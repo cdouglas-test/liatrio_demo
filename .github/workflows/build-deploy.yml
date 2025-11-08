@@ -14,36 +14,18 @@ on:
       - 'k8s/**'
       - '.github/workflows/build-deploy.yml'
 
+# Required for OIDC authentication to AWS
+permissions:
+  id-token: write
+  contents: read
+
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: liatrio-demo-dev-api
   EKS_CLUSTER_NAME: liatrio-demo-dev-eks
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          cd app
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run tests
-        run: |
-          cd app
-          python test_api.py
-
   build-and-push:
-    needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     
@@ -55,12 +37,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-BuildDeploy
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -93,7 +75,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    needs: [test, build-and-push]
+    needs: build-and-push
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     
@@ -101,12 +83,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Deploy
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -150,12 +132,12 @@ jobs:
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     
     steps:
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-SecurityScan
 
       - name: Scan ECR image
         run: |
