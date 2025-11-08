@@ -17,7 +17,7 @@ resource "aws_s3_bucket" "liatrio_demo_bucket" {
   bucket = "${var.project_name}-${var.environment}"
 
   tags = {
-    Name        = "${var.project_name}-${var.environment}-bucket"
+    Name        = "${var.project_name}-${var.environment}"
     Environment = var.environment
     Project     = var.project_name
     Purpose     = "Liatrio Demo - Pipeline Testing"
