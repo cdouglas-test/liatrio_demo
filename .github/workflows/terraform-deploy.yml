@@ -33,8 +33,6 @@ jobs:
     name: Terraform Plan
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment || 'dev' }}
-    outputs:
-      plan-exitcode: ${{ steps.plan.outputs.exitcode }}
     
     steps:
       - name: Checkout code
@@ -64,7 +62,6 @@ jobs:
         id: plan
         run: |
           terraform plan -detailed-exitcode -no-color -out=tfplan
-          echo "exitcode=$?" >> $GITHUB_OUTPUT
         working-directory: ./infrastructure
         env:
           TF_WORKSPACE: ${{ github.event.inputs.environment || 'dev' }}
@@ -81,7 +78,6 @@ jobs:
     name: Terraform Apply
     runs-on: ubuntu-latest
     needs: terraform-plan
-    if: needs.terraform-plan.outputs.plan-exitcode == '2'
     environment: 
       name: ${{ github.event.inputs.environment || 'dev' }}
     
