@@ -17,6 +17,7 @@ jobs:
   terraform-plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
+    environment: dev
     
     steps:
       - name: Checkout code
@@ -67,6 +68,7 @@ jobs:
   tflint:
     name: TFLint
     runs-on: ubuntu-latest
+    environment: dev
 
     steps:
       - name: Checkout code
