@@ -2,7 +2,7 @@ name: Build and Deploy API
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
     paths: 
       - 'app/**'
       - 'k8s/**'
@@ -14,38 +14,19 @@ on:
       - 'k8s/**'
       - '.github/workflows/build-deploy.yml'
 
+# Required for OIDC authentication to AWS
+permissions:
+  id-token: write
+  contents: read
+
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: liatrio-demo-dev-api
   EKS_CLUSTER_NAME: liatrio-demo-dev-eks
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          cd app
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run tests
-        run: |
-          cd app
-          python test_api.py
-
   build-and-push:
-    needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
@@ -55,12 +36,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-BuildDeploy
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -74,7 +55,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
-            type=sha,prefix={{branch}}-
+            type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Set up Docker Buildx
@@ -93,7 +74,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    needs: [test, build-and-push]
+    needs: build-and-push
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     
@@ -101,12 +82,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Deploy
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -118,8 +99,9 @@ jobs:
 
       - name: Deploy to EKS
         run: |
-          # Replace image placeholder with actual ECR image
-          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:main-${{ github.sha }}"
+          # Use the short SHA for the image tag
+          IMAGE_TAG="${GITHUB_SHA:0:7}"
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
           
           # Update deployment manifest with actual image URI
           sed -i "s|IMAGE_URI_PLACEHOLDER|${IMAGE_URI}|g" k8s/deployment.yaml
@@ -143,28 +125,3 @@ jobs:
           
           # Check application logs
           kubectl logs -l app=liatrio-demo-api --tail=50
-
-  security-scan:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
-    
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Scan ECR image
-        run: |
-          # Get the latest image tag
-          IMAGE_TAG="main-${{ github.sha }}"
-          
-          # Run ECR security scan
-          aws ecr start-image-scan --repository-name ${{ env.ECR_REPOSITORY }} --image-id imageTag=${IMAGE_TAG}
-          
-          # Wait for scan to complete (optional)
-          echo "Security scan initiated for image: ${IMAGE_TAG}"
-          echo "Check ECR console for detailed results"

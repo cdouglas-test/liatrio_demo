@@ -234,7 +234,7 @@ module "eks" {
     ManagedBy   = "Terraform"
   }
 }
-
+    
 # Configure providers after EKS cluster creation
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
