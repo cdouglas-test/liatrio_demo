@@ -18,7 +18,7 @@ provider "aws" {
 
 # Cloud Posse tfstate-backend module for remote state management
 module "tfstate_backend" {
-  source = "cloudposse/tfstate-backend/aws"
+  source  = "cloudposse/tfstate-backend/aws"
   version = "~> 1.4"
 
   namespace   = var.project_name
@@ -27,19 +27,19 @@ module "tfstate_backend" {
   name        = "tfstate"
 
   # S3 bucket configuration
-  s3_bucket_name                         = "${var.project_name}-${var.environment}-tfstate-${random_string.tfstate_suffix.result}"
-  s3_replication_enabled                 = false
-  force_destroy                          = var.environment != "prod" ? true : false
+  s3_bucket_name         = "${var.project_name}-${var.environment}-tfstate-${random_string.tfstate_suffix.result}"
+  s3_replication_enabled = false
+  force_destroy          = var.environment != "prod" ? true : false
 
   # DynamoDB table configuration
-  dynamodb_table_name                    = "${var.project_name}-${var.environment}-tfstate-lock"
-  dynamodb_enabled                       = true
+  dynamodb_table_name = "${var.project_name}-${var.environment}-tfstate-lock"
+  dynamodb_enabled    = true
 
   # Security settings
-  block_public_acls                      = true
-  block_public_policy                    = true
-  ignore_public_acls                     = true
-  restrict_public_buckets                = true
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 
   tags = {
     Project     = var.project_name

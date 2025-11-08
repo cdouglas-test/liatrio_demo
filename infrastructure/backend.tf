@@ -1,4 +1,4 @@
-﻿# backend.tf
+# backend.tf
 # Remote state backend configuration
 
 terraform {
