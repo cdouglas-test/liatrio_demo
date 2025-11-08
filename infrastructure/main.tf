@@ -9,11 +9,25 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.1"
     }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.25"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.12"
+    }
   }
 }
 
 provider "aws" {
   region = var.aws_region
+}
+
+# Get current AWS account info
+data "aws_caller_identity" "current" {}
+data "aws_availability_zones" "available" {
+  state = "available"
 }
 
 # Cloud Posse tfstate-backend module for remote state management
@@ -54,4 +68,169 @@ resource "random_string" "tfstate_suffix" {
   length  = 8
   special = false
   upper   = false
+}
+
+# ECR Repository for container images
+resource "aws_ecr_repository" "app_repo" {
+  name                 = "${var.project_name}-${var.environment}-api"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  encryption_configuration {
+    encryption_type = "AES256"
+  }
+
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-api"
+    Project     = var.project_name
+    Environment = var.environment
+    Purpose     = "Container Registry"
+    ManagedBy   = "Terraform"
+  }
+}
+
+# ECR Repository Policy
+resource "aws_ecr_repository_policy" "app_repo_policy" {
+  repository = aws_ecr_repository.app_repo.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowPull"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+      }
+    ]
+  })
+}
+
+# VPC for EKS cluster
+module "vpc" {
+  source = "terraform-aws-modules/vpc/aws"
+  version = "~> 5.0"
+
+  name = "${var.project_name}-${var.environment}-vpc"
+  cidr = var.vpc_cidr
+
+  azs             = slice(data.aws_availability_zones.available.names, 0, 3)
+  private_subnets = var.private_subnet_cidrs
+  public_subnets  = var.public_subnet_cidrs
+
+  enable_nat_gateway = true
+  enable_vpn_gateway = false
+  enable_dns_hostnames = true
+  enable_dns_support = true
+
+  # Tags required for EKS
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-vpc"
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks" = "shared"
+  }
+
+  public_subnet_tags = {
+    "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks" = "shared"
+    "kubernetes.io/role/elb" = 1
+  }
+
+  private_subnet_tags = {
+    "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks" = "shared"
+    "kubernetes.io/role/internal-elb" = 1
+  }
+}
+
+# EKS Cluster
+module "eks" {
+  source = "terraform-aws-modules/eks/aws"
+  version = "~> 20.0"
+
+  cluster_name    = "${var.project_name}-${var.environment}-eks"
+  cluster_version = var.kubernetes_version
+
+  vpc_id     = module.vpc.vpc_id
+  subnet_ids = module.vpc.private_subnets
+
+  # Cluster endpoint configuration
+  cluster_endpoint_public_access  = true
+  cluster_endpoint_private_access = true
+  cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
+
+  # Cluster addons
+  cluster_addons = {
+    coredns = {
+      most_recent = true
+    }
+    kube-proxy = {
+      most_recent = true
+    }
+    vpc-cni = {
+      most_recent = true
+    }
+    aws-ebs-csi-driver = {
+      most_recent = true
+    }
+  }
+
+  # EKS Managed Node Groups
+  eks_managed_node_groups = {
+    main = {
+      name           = "${var.project_name}-${var.environment}-nodes"
+      instance_types = var.node_instance_types
+      
+      min_size     = var.node_group_min_size
+      max_size     = var.node_group_max_size
+      desired_size = var.node_group_desired_size
+
+      disk_size = 50
+      
+      labels = {
+        Environment = var.environment
+        Project     = var.project_name
+      }
+
+      tags = {
+        Name        = "${var.project_name}-${var.environment}-node"
+        Project     = var.project_name
+        Environment = var.environment
+        ManagedBy   = "Terraform"
+      }
+    }
+  }
+
+  # Cluster access entry
+  access_entries = {
+    admin = {
+      kubernetes_groups = []
+      principal_arn     = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+      
+      policy_associations = {
+        admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+  }
+
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-eks"
+    Project     = var.project_name
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+  }
 }
