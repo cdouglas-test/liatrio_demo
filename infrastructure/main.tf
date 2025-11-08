@@ -46,7 +46,7 @@ module "tfstate_backend" {
   force_destroy          = var.environment != "prod" ? true : false
 
   # DynamoDB table configuration
-  dynamodb_table_name = "${var.project_name}-${var.environment}-tfstate-lock"
+  dynamodb_table_name = "${var.project_name}-${var.environment}-tfstate-lock-${random_string.tfstate_suffix.result}"
   dynamodb_enabled    = true
 
   # Security settings
@@ -68,6 +68,10 @@ resource "random_string" "tfstate_suffix" {
   length  = 8
   special = false
   upper   = false
+  
+  lifecycle {
+    ignore_changes = all
+  }
 }
 
 # ECR Repository for container images
@@ -123,9 +127,9 @@ module "vpc" {
   name = "${var.project_name}-${var.environment}-vpc"
   cidr = var.vpc_cidr
 
-  azs             = slice(data.aws_availability_zones.available.names, 0, 3)
-  private_subnets = var.private_subnet_cidrs
-  public_subnets  = var.public_subnet_cidrs
+  azs             = slice(data.aws_availability_zones.available.names, 0, 2)
+  private_subnets = slice(var.private_subnet_cidrs, 0, 2)
+  public_subnets  = slice(var.public_subnet_cidrs, 0, 2)
 
   enable_nat_gateway = true
   enable_vpn_gateway = false
@@ -138,16 +142,16 @@ module "vpc" {
     Project     = var.project_name
     Environment = var.environment
     ManagedBy   = "Terraform"
-    "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks" = "shared"
+    "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks-${random_string.tfstate_suffix.result}" = "shared"
   }
 
   public_subnet_tags = {
-    "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks" = "shared"
+    "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks-${random_string.tfstate_suffix.result}" = "shared"
     "kubernetes.io/role/elb" = 1
   }
 
   private_subnet_tags = {
-    "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks" = "shared"
+    "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks-${random_string.tfstate_suffix.result}" = "shared"
     "kubernetes.io/role/internal-elb" = 1
   }
 }
@@ -157,7 +161,7 @@ module "eks" {
   source = "terraform-aws-modules/eks/aws"
   version = "~> 20.0"
 
-  cluster_name    = "${var.project_name}-${var.environment}-eks"
+  cluster_name    = "${var.project_name}-${var.environment}-eks-${random_string.tfstate_suffix.result}"
   cluster_version = var.kubernetes_version
 
   vpc_id     = module.vpc.vpc_id
@@ -168,20 +172,16 @@ module "eks" {
   cluster_endpoint_private_access = true
   cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
 
-  # Cluster addons
+  # Cluster addons - minimal set for faster deployment
   cluster_addons = {
-    coredns = {
+    vpc-cni = {
       most_recent = true
     }
     kube-proxy = {
       most_recent = true
     }
-    vpc-cni = {
-      most_recent = true
-    }
-    aws-ebs-csi-driver = {
-      most_recent = true
-    }
+    # coredns will be added automatically by EKS
+    # aws-ebs-csi-driver removed to avoid timeout issues
   }
 
   # EKS Managed Node Groups
@@ -206,6 +206,13 @@ module "eks" {
         Project     = var.project_name
         Environment = var.environment
         ManagedBy   = "Terraform"
+      }
+
+      # Increase timeouts for node group operations
+      timeouts = {
+        create = "30m"
+        update = "30m"
+        delete = "30m"
       }
     }
   }
@@ -232,6 +239,13 @@ module "eks" {
     Project     = var.project_name
     Environment = var.environment
     ManagedBy   = "Terraform"
+  }
+
+  # Cluster-level timeouts
+  cluster_timeouts = {
+    create = "30m"
+    update = "60m"
+    delete = "15m"
   }
 }
     

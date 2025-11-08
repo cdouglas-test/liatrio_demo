@@ -6,7 +6,7 @@ terraform {
     bucket         = "liatrio-demo-dev-tfstate-u58x74nr"
     key            = "terraform.tfstate"
     region         = "us-east-1"
-    dynamodb_table = "liatrio-demo-dev-tfstate-lock"
+    dynamodb_table = "liatrio-demo-dev-tfstate-lock-u58x74nr"
     encrypt        = true
   }
 }
