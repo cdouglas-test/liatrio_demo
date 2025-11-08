@@ -8,6 +8,11 @@ on:
       - '**/*.tfvars'
       - '**/*.hcl'
 
+# Required for OIDC authentication to AWS
+permissions:
+  id-token: write
+  contents: read
+
 env:
   TF_VERSION: '1.9.0'
   TFLINT_VERSION: 'v0.50.3'
@@ -23,12 +28,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-TerraformValidation
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -46,8 +51,6 @@ jobs:
         run: terraform init
         working-directory: ./infrastructure
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
       - name: Terraform Validate
@@ -61,8 +64,6 @@ jobs:
         working-directory: ./infrastructure
         continue-on-error: true
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
   tflint:

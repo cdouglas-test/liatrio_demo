@@ -19,6 +19,11 @@ on:
         - staging
         - prod
 
+# Required for OIDC authentication to AWS
+permissions:
+  id-token: write
+  contents: read
+
 env:
   TF_VERSION: '1.9.0'
   AWS_REGION: 'us-east-1'
@@ -35,12 +40,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-TerraformPlan
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -53,8 +58,6 @@ jobs:
         working-directory: ./infrastructure
         env:
           TF_WORKSPACE: ${{ github.event.inputs.environment || 'dev' }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
       - name: Terraform Plan
@@ -65,8 +68,6 @@ jobs:
         working-directory: ./infrastructure
         env:
           TF_WORKSPACE: ${{ github.event.inputs.environment || 'dev' }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
       - name: Upload Plan Artifact
@@ -88,12 +89,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-TerraformApply
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -110,8 +111,6 @@ jobs:
         working-directory: ./infrastructure
         env:
           TF_WORKSPACE: ${{ github.event.inputs.environment || 'dev' }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
 
       - name: Terraform Apply
@@ -120,6 +119,4 @@ jobs:
         working-directory: ./infrastructure
         env:
           TF_WORKSPACE: ${{ github.event.inputs.environment || 'dev' }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
