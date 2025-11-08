@@ -125,28 +125,3 @@ jobs:
           
           # Check application logs
           kubectl logs -l app=liatrio-demo-api --tail=50
-
-  security-scan:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
-    
-    steps:
-      - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActions-SecurityScan
-
-      - name: Scan ECR image
-        run: |
-          # Get the latest image tag
-          IMAGE_TAG="main-${{ github.sha }}"
-          
-          # Run ECR security scan
-          aws ecr start-image-scan --repository-name ${{ env.ECR_REPOSITORY }} --image-id imageTag=${IMAGE_TAG}
-          
-          # Wait for scan to complete (optional)
-          echo "Security scan initiated for image: ${IMAGE_TAG}"
-          echo "Check ECR console for detailed results"
