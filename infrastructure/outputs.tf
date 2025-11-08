@@ -1,33 +1,3 @@
-output "s3_bucket_name" {
-  description = "Name of the S3 bucket created"
-  value       = aws_s3_bucket.liatrio_demo_bucket.bucket
-}
-
-output "s3_bucket_arn" {
-  description = "ARN of the S3 bucket created"
-  value       = aws_s3_bucket.liatrio_demo_bucket.arn
-}
-
-output "s3_bucket_region" {
-  description = "Region where the S3 bucket is created"
-  value       = aws_s3_bucket.liatrio_demo_bucket.region
-}
-
-output "s3_bucket_domain_name" {
-  description = "Domain name of the S3 bucket"
-  value       = aws_s3_bucket.liatrio_demo_bucket.bucket_domain_name
-}
-
-output "test_object_key" {
-  description = "Key of the test object in the S3 bucket"
-  value       = aws_s3_object.test_object.key
-}
-
-output "test_object_etag" {
-  description = "ETag of the test object"
-  value       = aws_s3_object.test_object.etag
-}
-
 # Terraform state backend outputs
 output "tfstate_backend_s3_bucket_id" {
   description = "S3 bucket ID for Terraform state"

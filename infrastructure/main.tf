@@ -48,3 +48,10 @@ module "tfstate_backend" {
     ManagedBy   = "Terraform"
   }
 }
+
+# Random string for tfstate backend uniqueness
+resource "random_string" "tfstate_suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
