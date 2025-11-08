@@ -2,7 +2,7 @@ name: Build and Deploy API
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
     paths: 
       - 'app/**'
       - 'k8s/**'
@@ -27,7 +27,6 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
