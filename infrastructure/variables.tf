@@ -83,3 +83,9 @@ variable "node_group_desired_size" {
   type        = number
   default     = 2
 }
+
+variable "github_actions_role_arn" {
+  description = "ARN of the GitHub Actions OIDC role for EKS access"
+  type        = string
+  default     = ""
+}
