@@ -1,0 +1,61 @@
+name: Debug API
+
+on:
+  workflow_dispatch:  # Manual trigger
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: liatrio-demo-dev-eks-xscgoqr8
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    environment: dev
+    
+    steps:
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Debug
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+      - name: Debug deployment
+        run: |
+          echo "=== Pod Status ==="
+          kubectl get pods -l app=liatrio-demo-api-simple -o wide
+          
+          echo ""
+          echo "=== Service Details ==="
+          kubectl get service liatrio-demo-api-simple-service -o wide
+          kubectl describe service liatrio-demo-api-simple-service
+          
+          echo ""
+          echo "=== Pod Logs ==="
+          kubectl logs -l app=liatrio-demo-api-simple --tail=50
+          
+          echo ""
+          echo "=== Pod Describe ==="
+          kubectl describe pods -l app=liatrio-demo-api-simple
+          
+          echo ""
+          echo "=== Test from inside cluster ==="
+          # Create a test pod to test connectivity from inside the cluster
+          kubectl run test-pod --image=curlimages/curl --rm -i --restart=Never -- curl -v http://liatrio-demo-api-simple-service/health
+          
+          echo ""
+          echo "=== Load Balancer Status ==="
+          LB_URL=$(kubectl get service liatrio-demo-api-simple-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          echo "Load balancer URL: $LB_URL"
+          
+          # Test from GitHub Actions
+          echo "Testing from external..."
+          curl -v "http://$LB_URL/health" || echo "External test failed"
