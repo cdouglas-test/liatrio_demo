@@ -35,6 +35,15 @@ def api():
         "timestamp": int(time.time())
     })
 
+@app.route('/test', methods=['GET'])
+def test():
+    """Main API endpoint as specified in the problem statement"""
+    return jsonify({
+        "message": "test",
+        "timestamp": int(time.time())
+    })
+
+
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint for Kubernetes probes"""
