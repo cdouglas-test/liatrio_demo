@@ -4,7 +4,7 @@
 param(
     [string]$AwsRegion = "us-east-1",
     [string]$EcrRepository = "liatrio-demo-dev-api",
-    [string]$EksClusterName = "liatrio-demo-dev-eks",
+    [string]$EksClusterName = "liatrio-demo-dev-eks-u58x74nr",
     [string]$ImageTag = "manual-$(Get-Date -Format 'yyyyMMddHHmmss')"
 )
 
