@@ -98,8 +98,20 @@ jobs:
       - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
-          # Verify kubectl access
-          kubectl auth can-i get pods --all-namespaces
+
+      - name: Debug EKS Access
+        run: |
+          echo "=== Current Identity ==="
+          aws sts get-caller-identity
+          
+          echo "=== EKS Cluster Status ==="
+          aws eks describe-cluster --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --query 'cluster.{Status:status,Endpoint:endpoint}'
+          
+          echo "=== EKS Access Entries ==="
+          aws eks list-access-entries --cluster-name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+          
+          echo "=== Testing Token Generation ==="
+          aws eks get-token --cluster-name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --query 'status.expirationTimestamp'
 
       - name: Deploy to EKS
         run: |
