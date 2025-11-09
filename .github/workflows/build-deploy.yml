@@ -105,17 +105,19 @@ jobs:
           IMAGE_TAG="${GITHUB_SHA:0:7}"
           IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
           
-          # Update deployment manifest with actual image URI
-          sed -i "s|IMAGE_URI_PLACEHOLDER|${IMAGE_URI}|g" k8s/deployment.yaml
+          # Update deployment manifest with actual image URI (using version without ingress)
+          sed -i "s|IMAGE_URI_PLACEHOLDER|${IMAGE_URI}|g" k8s/deployment-no-ingress.yaml
           
           # Apply Kubernetes manifests
-          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/deployment-no-ingress.yaml
           
           # Wait for deployment to be ready
           kubectl rollout status deployment/liatrio-demo-api -n default --timeout=300s
           
-          # Get service information
+          # Get service information and load balancer URL
           kubectl get services liatrio-demo-api-service -n default
+          echo "Load Balancer URL:"
+          kubectl get service liatrio-demo-api-service -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' || echo "Load balancer still provisioning..."
 
       - name: Verify deployment
         run: |
