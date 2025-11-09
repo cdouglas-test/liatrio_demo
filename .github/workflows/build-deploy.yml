@@ -54,10 +54,8 @@ jobs:
         with:
           images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -67,7 +65,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./app
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -160,16 +158,16 @@ jobs:
           echo "Pod Status: $POD_STATUS"
           
           if [ "$POD_STATUS" = "Running" ]; then
-            echo "🎉 SUCCESS! Pod is running!"
+            echo "SUCCESS! Pod is running!"
             
             # Get load balancer URL
             LB_URL=$(kubectl get service liatrio-demo-api-simple-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
             if [ -n "$LB_URL" ]; then
-              echo "🌐 Load Balancer URL: http://$LB_URL"
-              echo "🔗 API Endpoint: http://$LB_URL/api"
-              echo "❤️ Health Endpoint: http://$LB_URL/health"
+              echo "Load Balancer URL: http://$LB_URL"
+              echo "API Endpoint: http://$LB_URL/api"
+              echo "Health Endpoint: http://$LB_URL/health"
             else
-              echo "⏳ Load balancer still provisioning..."
+              echo "Load balancer still provisioning..."
             fi
             
             # Test pod logs
@@ -178,7 +176,7 @@ jobs:
             kubectl logs -l app=liatrio-demo-api-simple --tail=20 || echo "No logs yet"
             
           else
-            echo "❌ Pod not running. Status: $POD_STATUS"
+            echo "Pod not running. Status: $POD_STATUS"
             
             # Get logs anyway for debugging
             echo ""
