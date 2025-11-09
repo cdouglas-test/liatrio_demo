@@ -101,51 +101,112 @@ jobs:
 
       - name: Deploy to EKS
         run: |
+          set +e  # Don't exit on errors, continue for debugging
+          
           # First test: Deploy nginx to verify cluster works
           echo "=== Testing cluster with nginx ==="
           kubectl apply -f k8s/nginx-test.yaml
           
           # Wait for nginx pod
           echo "Waiting for nginx pod..."
-          kubectl wait --for=condition=Ready pod/nginx-test-pod --timeout=60s || echo "Nginx pod failed"
+          kubectl wait --for=condition=Ready pod/nginx-test-pod --timeout=30s
+          NGINX_SUCCESS=$?
           
-          # Check nginx status
-          kubectl get pods nginx-test-pod
-          kubectl describe pod nginx-test-pod
+          # Check nginx status regardless of success/failure
+          echo "=== Nginx Pod Status ==="
+          kubectl get pods nginx-test-pod -o wide || echo "Nginx pod not found"
+          kubectl describe pod nginx-test-pod || echo "Nginx pod describe failed"
           
-          # If nginx works, try our app as a simple pod
+          if [ $NGINX_SUCCESS -eq 0 ]; then
+            echo "✅ Nginx pod started successfully - cluster is working"
+          else
+            echo "❌ Nginx pod failed - cluster issue detected"
+          fi
+          
+          # Test our app as a simple pod
+          echo ""
           echo "=== Testing our app as pod ==="
           IMAGE_TAG="${GITHUB_SHA:0:7}"
           IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+          echo "Using image: $IMAGE_URI"
           
           # Update pod manifest with actual image URI
           sed -i "s|IMAGE_URI_PLACEHOLDER|${IMAGE_URI}|g" k8s/pod-test.yaml
+          
+          # Show what we're deploying
+          echo "=== Pod manifest ==="
+          cat k8s/pod-test.yaml
+          echo ""
           
           # Apply our app pod
           kubectl apply -f k8s/pod-test.yaml
           
           # Wait for our pod (shorter timeout)
           echo "Waiting for our app pod..."
-          kubectl wait --for=condition=Ready pod/liatrio-demo-api-pod --timeout=120s || echo "App pod failed"
+          kubectl wait --for=condition=Ready pod/liatrio-demo-api-pod --timeout=60s
+          APP_SUCCESS=$?
           
-          # Check our pod status
-          kubectl get pods liatrio-demo-api-pod
-          kubectl describe pod liatrio-demo-api-pod
+          # Check our pod status regardless of success/failure
+          echo ""
+          echo "=== App Pod Status ==="
+          kubectl get pods liatrio-demo-api-pod -o wide || echo "App pod not found"
+          kubectl describe pod liatrio-demo-api-pod || echo "App pod describe failed"
           
-          # Get events for debugging
-          echo "=== Recent events ==="
-          kubectl get events --sort-by='.lastTimestamp' --field-selector type!=Normal | tail -10
+          # Get pod logs if it exists
+          echo ""
+          echo "=== App Pod Logs ==="
+          kubectl logs liatrio-demo-api-pod || echo "No logs available"
+          
+          # Get recent events
+          echo ""
+          echo "=== Recent Events ==="
+          kubectl get events --sort-by='.lastTimestamp' | tail -15
+          
+          # Check image availability
+          echo ""
+          echo "=== Checking if image exists in ECR ==="
+          aws ecr describe-images --repository-name liatrio-demo-dev-api --image-ids imageTag=$IMAGE_TAG --region us-east-1 || echo "Image not found in ECR"
           
           # Get service information
+          echo ""
+          echo "=== Services ==="
           kubectl get services
+          
+          # Summary
+          echo ""
+          echo "=== SUMMARY ==="
+          if [ $NGINX_SUCCESS -eq 0 ]; then
+            echo "✅ Nginx: SUCCESS - Cluster can run pods"
+          else
+            echo "❌ Nginx: FAILED - Cluster has issues"
+          fi
+          
+          if [ $APP_SUCCESS -eq 0 ]; then
+            echo "✅ App: SUCCESS - Your container works"
+            exit 0
+          else
+            echo "❌ App: FAILED - Container/image issue"
+            exit 1
+          fi
 
       - name: Verify deployment
+        if: success()
         run: |
-          # Wait for pods to be ready
-          kubectl wait --for=condition=ready pod -l app=liatrio-demo-api --timeout=300s
+          echo "=== Final Verification ==="
+          kubectl get pods,services
           
-          # Get pod status
-          kubectl get pods -l app=liatrio-demo-api
-          
-          # Check application logs
-          kubectl logs -l app=liatrio-demo-api --tail=50
+          # Test the API if it's running
+          if kubectl get pod liatrio-demo-api-pod --no-headers | grep -q "Running"; then
+            echo "Pod is running! Testing API..."
+            # Get the load balancer URL when ready
+            LB_URL=$(kubectl get service liatrio-demo-api-pod-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "$LB_URL" ]; then
+              echo "Load Balancer URL: http://$LB_URL"
+              echo "API Endpoint: http://$LB_URL/api"
+              echo "Health Endpoint: http://$LB_URL/health"
+            else
+              echo "Load balancer still provisioning..."
+            fi
+          else
+            echo "Pod not running yet"
+          fi
