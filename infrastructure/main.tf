@@ -172,7 +172,6 @@ module "eks" {
   cluster_endpoint_private_access = true
   cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
 
-  # Cluster addons - minimal set for faster deployment
   cluster_addons = {
     vpc-cni = {
       most_recent = true
@@ -180,8 +179,6 @@ module "eks" {
     kube-proxy = {
       most_recent = true
     }
-    # coredns will be added automatically by EKS
-    # aws-ebs-csi-driver removed to avoid timeout issues
   }
 
   # EKS Managed Node Groups
@@ -257,6 +254,19 @@ provider "kubernetes" {
   exec {
     api_version = "client.authentication.k8s.io/v1beta1"
     command     = "aws"
-    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name]
+    args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
+  }
+}
+
+provider "helm" {
+  kubernetes {
+    host                   = module.eks.cluster_endpoint
+    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.aws_region]
+    }
   }
 }

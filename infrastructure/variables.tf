@@ -10,19 +10,6 @@ variable "project_name" {
   default     = "liatrio-demo"
 }
 
-# Deployment stage controls
-variable "deploy_node_groups" {
-  description = "Whether to deploy EKS managed node groups"
-  type        = bool
-  default     = false
-}
-
-variable "deploy_addons" {
-  description = "Whether to deploy EKS cluster addons"
-  type        = bool
-  default     = false
-}
-
 variable "environment" {
   description = "Environment name (dev, staging, prod)"
   type        = string
