@@ -20,7 +20,7 @@ def root():
     return jsonify({
         "message": "Welcome to the Liatrio Demo API!",
         "endpoints": {
-            "/": "This welcome message",
+            "/": "WELCOME ENDPOINT!",
             "/api": "Main API endpoint",
             "/health": "Health check endpoint"
         },

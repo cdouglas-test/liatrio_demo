@@ -1,6 +1,9 @@
 # Problem statement
 _PROBLEM_STATEMENT/PROBLEM_STATEMENT.md
 
+# Manual deployment scripts (using GitHub Actions instead)
+scripts/
+
 # Terraform
 **/.terraform/*
 **/.terraform.lock.hcl
