@@ -179,6 +179,8 @@ module "eks" {
     kube-proxy = {
       most_recent = true
     }
+    # coredns will be added automatically by EKS
+    # aws-ebs-csi-driver removed to avoid timeout issues
   }
 
   # EKS Managed Node Groups
