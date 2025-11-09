@@ -99,7 +99,7 @@ jobs:
         run: |
           aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
 
-      - name: Deploy to EKS using AWS CLI
+      - name: Deploy to EKS
         run: |
           # Use the short SHA for the image tag
           IMAGE_TAG="${GITHUB_SHA:0:7}"
@@ -108,57 +108,22 @@ jobs:
           # Update deployment manifest with actual image URI
           sed -i "s|IMAGE_URI_PLACEHOLDER|${IMAGE_URI}|g" k8s/deployment.yaml
           
-          # Check cluster status
-          echo "=== Cluster Status ==="
-          aws eks describe-cluster --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --query 'cluster.{Status:status,Version:version,Endpoint:endpoint}'
+          # Apply Kubernetes manifests
+          kubectl apply -f k8s/deployment.yaml
           
-          # Check node groups
-          echo "=== Node Groups ==="
-          aws eks list-nodegroups --cluster-name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+          # Wait for deployment to be ready
+          kubectl rollout status deployment/liatrio-demo-api -n default --timeout=300s
           
-          # Describe node group status
-          NODEGROUP_NAME=$(aws eks list-nodegroups --cluster-name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --query 'nodegroups[0]' --output text)
-          if [ "$NODEGROUP_NAME" != "None" ]; then
-            echo "=== Node Group Status ==="
-            aws eks describe-nodegroup --cluster-name ${{ env.EKS_CLUSTER_NAME }} --nodegroup-name $NODEGROUP_NAME --region ${{ env.AWS_REGION }} --query 'nodegroup.{Status:status,InstanceTypes:instanceTypes,ScalingConfig:scalingConfig}'
-          fi
-          
-          # Apply manifests (this still requires kubectl but we'll add error handling)
-          echo "=== Applying Kubernetes Manifests ==="
-          if kubectl apply -f k8s/deployment.yaml; then
-            echo "✅ Deployment applied successfully"
-          else
-            echo "❌ Deployment failed - checking cluster access"
-            aws sts get-caller-identity
-            aws eks list-access-entries --cluster-name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }} || echo "No access to list entries"
-            exit 1
-          fi
+          # Get service information
+          kubectl get services liatrio-demo-api-service -n default
 
-      - name: Verify deployment using AWS CLI
+      - name: Verify deployment
         run: |
-          echo "=== Current AWS Identity ==="
-          aws sts get-caller-identity
+          # Wait for pods to be ready
+          kubectl wait --for=condition=ready pod -l app=liatrio-demo-api --timeout=300s
           
-          echo "=== EKS Cluster Health ==="
-          aws eks describe-cluster --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --query 'cluster.{Status:status,Health:health,Version:version}'
+          # Get pod status
+          kubectl get pods -l app=liatrio-demo-api
           
-          echo "=== Node Group Health ==="
-          NODEGROUP_NAME=$(aws eks list-nodegroups --cluster-name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --query 'nodegroups[0]' --output text)
-          if [ "$NODEGROUP_NAME" != "None" ]; then
-            aws eks describe-nodegroup --cluster-name ${{ env.EKS_CLUSTER_NAME }} --nodegroup-name $NODEGROUP_NAME --region ${{ env.AWS_REGION }} --query 'nodegroup.{Status:status,Health:health,Capacity:scalingConfig}'
-          fi
-          
-          echo "=== Cluster Add-ons ==="
-          aws eks list-addons --cluster-name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
-          
-          # If kubectl works, get additional info
-          echo "=== Attempting kubectl verification ==="
-          if kubectl get nodes --timeout=10s; then
-            echo "✅ kubectl is working"
-            kubectl get pods -l app=liatrio-demo-api -o wide || echo "No pods found yet"
-            kubectl get services liatrio-demo-api-service || echo "Service not found yet"
-          else
-            echo "❌ kubectl authentication failed"
-            echo "Checking EKS access entries..."
-            aws eks list-access-entries --cluster-name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }} || echo "Cannot list access entries"
-          fi
+          # Check application logs
+          kubectl logs -l app=liatrio-demo-api --tail=50
