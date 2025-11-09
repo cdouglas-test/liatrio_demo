@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: liatrio-demo-api-simple
+  namespace: default
+  labels:
+    app: liatrio-demo-api-simple
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: liatrio-demo-api-simple
+  template:
+    metadata:
+      labels:
+        app: liatrio-demo-api-simple
+    spec:
+      containers:
+      - name: api
+        image: IMAGE_URI_PLACEHOLDER
+        ports:
+        - containerPort: 8080
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: PORT
+          value: "8080"
+        - name: HOST
+          value: "0.0.0.0"
+        resources:
+          requests:
+            memory: "16Mi"
+            cpu: "10m"
+          limits:
+            memory: "32Mi"
+            cpu: "50m"
+        # No health checks initially - let's just get it running first
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: liatrio-demo-api-simple-service
+  namespace: default
+  labels:
+    app: liatrio-demo-api-simple
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: liatrio-demo-api-simple

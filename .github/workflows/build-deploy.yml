@@ -101,33 +101,87 @@ jobs:
 
       - name: Deploy to EKS
         run: |
-          # Use the latest tag instead of SHA to avoid image pull issues
-          IMAGE_TAG="latest"
-          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${IMAGE_TAG}"
+          # Use the latest tag 
+          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest"
           
           echo "Using image: $IMAGE_URI"
           
-          # Update deployment manifest with actual image URI (using version without ingress)
-          sed -i "s|IMAGE_URI_PLACEHOLDER|${IMAGE_URI}|g" k8s/deployment-no-ingress.yaml
+          # Clean up any existing deployments first
+          echo "=== Cleaning up existing deployments ==="
+          kubectl delete deployment liatrio-demo-api --ignore-not-found=true
+          kubectl delete deployment liatrio-demo-api-simple --ignore-not-found=true
+          kubectl delete pod liatrio-demo-api-pod --ignore-not-found=true
+          sleep 10
           
-          # Apply Kubernetes manifests
-          kubectl apply -f k8s/deployment-no-ingress.yaml
+          # Update simple deployment manifest
+          sed -i "s|IMAGE_URI_PLACEHOLDER|${IMAGE_URI}|g" k8s/simple-deployment.yaml
           
-          # Wait for deployment to be ready
-          kubectl rollout status deployment/liatrio-demo-api -n default --timeout=300s
+          # Show what we're deploying
+          echo "=== Deployment manifest ==="
+          cat k8s/simple-deployment.yaml
+          echo ""
           
-          # Get service information and load balancer URL
-          kubectl get services liatrio-demo-api-service -n default
-          echo "Load Balancer URL:"
-          kubectl get service liatrio-demo-api-service -n default -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' || echo "Load balancer still provisioning..."
+          # Apply simple deployment
+          echo "=== Applying deployment ==="
+          kubectl apply -f k8s/simple-deployment.yaml
+          
+          # Wait with shorter timeout and get status regardless
+          echo "=== Waiting for deployment (60s timeout) ==="
+          kubectl rollout status deployment/liatrio-demo-api-simple --timeout=60s || echo "Deployment timeout"
+          
+          # Get detailed status
+          echo ""
+          echo "=== Deployment Status ==="
+          kubectl get deployment liatrio-demo-api-simple -o wide
+          
+          echo ""
+          echo "=== Pod Status ==="
+          kubectl get pods -l app=liatrio-demo-api-simple -o wide
+          
+          echo ""
+          echo "=== Pod Details ==="
+          kubectl describe pods -l app=liatrio-demo-api-simple
+          
+          echo ""
+          echo "=== Recent Events ==="
+          kubectl get events --sort-by='.lastTimestamp' | tail -10
+          
+          echo ""
+          echo "=== Services ==="
+          kubectl get services
 
       - name: Verify deployment
+        if: always()  # Run this even if deploy step fails
         run: |
-          # Wait for pods to be ready
-          kubectl wait --for=condition=ready pod -l app=liatrio-demo-api --timeout=300s
+          echo "=== Final Status Check ==="
           
-          # Get pod status
-          kubectl get pods -l app=liatrio-demo-api
+          # Check if pod is running
+          POD_STATUS=$(kubectl get pods -l app=liatrio-demo-api-simple --no-headers 2>/dev/null | awk '{print $3}' | head -1 || echo "NotFound")
+          echo "Pod Status: $POD_STATUS"
           
-          # Check application logs
-          kubectl logs -l app=liatrio-demo-api --tail=50
+          if [ "$POD_STATUS" = "Running" ]; then
+            echo "🎉 SUCCESS! Pod is running!"
+            
+            # Get load balancer URL
+            LB_URL=$(kubectl get service liatrio-demo-api-simple-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "$LB_URL" ]; then
+              echo "🌐 Load Balancer URL: http://$LB_URL"
+              echo "🔗 API Endpoint: http://$LB_URL/api"
+              echo "❤️ Health Endpoint: http://$LB_URL/health"
+            else
+              echo "⏳ Load balancer still provisioning..."
+            fi
+            
+            # Test pod logs
+            echo ""
+            echo "=== Application Logs ==="
+            kubectl logs -l app=liatrio-demo-api-simple --tail=20 || echo "No logs yet"
+            
+          else
+            echo "❌ Pod not running. Status: $POD_STATUS"
+            
+            # Get logs anyway for debugging
+            echo ""
+            echo "=== Debug Logs ==="
+            kubectl logs -l app=liatrio-demo-api-simple --tail=20 || echo "No logs available"
+          fi
