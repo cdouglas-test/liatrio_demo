@@ -22,7 +22,7 @@ permissions:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: liatrio-demo-dev-api
-  EKS_CLUSTER_NAME: liatrio-demo-dev-eks-u58x74nr
+  EKS_CLUSTER_NAME: liatrio-demo-dev-eks-xscgoqr8
 
 jobs:
   build-and-push:
