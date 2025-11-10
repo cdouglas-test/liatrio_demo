@@ -12,6 +12,7 @@ on:
 permissions:
   id-token: write
   contents: read
+  checks: write  # Required for creating check-runs
 
 env:
   TF_VERSION: '1.9.0'
@@ -19,10 +20,79 @@ env:
   AWS_REGION: 'us-east-1'
 
 jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      infra-changed: ${{ steps.changes.outputs.infra }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes
+        id: changes
+        uses: dorny/paths-filter@v2
+        with:
+          filters: |
+            infra:
+              - 'infrastructure/**'
+              - '.github/workflows/terraform-*.yml'
+              - '**/*.tf'
+              - '**/*.tfvars'
+              - '**/*.hcl'
+
+      - name: Create success check for terraform-plan if not needed
+        if: steps.changes.outputs.infra != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const checkName = 'terraform-plan';
+            const conclusion = 'success';
+            
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: checkName,
+              head_sha: context.sha,
+              status: 'completed',
+              conclusion: conclusion,
+              output: {
+                title: 'Terraform plan job skipped',
+                summary: 'No infrastructure code changes detected. Terraform plan job marked as successful.',
+                text: 'This check was automatically created because no Terraform files were modified.'
+              }
+            });
+
+      - name: Create success check for tflint if not needed
+        if: steps.changes.outputs.infra != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const checkName = 'tflint';
+            const conclusion = 'success';
+            
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: checkName,
+              head_sha: context.sha,
+              status: 'completed',
+              conclusion: conclusion,
+              output: {
+                title: 'TFLint job skipped',
+                summary: 'No infrastructure code changes detected. TFLint job marked as successful.',
+                text: 'This check was automatically created because no Terraform files were modified.'
+              }
+            });
+
   terraform-plan:
     name: Terraform Plan
     runs-on: ubuntu-latest
     environment: dev
+    needs: gate
+    if: needs.gate.outputs.infra-changed == 'true'
     
     steps:
       - name: Checkout code
@@ -70,6 +140,8 @@ jobs:
     name: TFLint
     runs-on: ubuntu-latest
     environment: dev
+    needs: gate
+    if: needs.gate.outputs.infra-changed == 'true'
 
     steps:
       - name: Checkout code
