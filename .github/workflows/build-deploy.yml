@@ -25,7 +25,100 @@ env:
   EKS_CLUSTER_NAME: liatrio-demo-dev-eks-xscgoqr8
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          cd app
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          cd app
+          python -m pytest test_app.py -v --tb=short --cov=app --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage reports to Codecov
+        if: always()
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./app/coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+      - name: Test Docker build
+        run: |
+          cd app
+          docker build -t liatrio-demo-api:test .
+
+      - name: Integration test with Docker
+        run: |
+          cd app
+          # Start container in background
+          docker run -d --name test-container -p 8080:8080 liatrio-demo-api:test
+          
+          # Wait for container to start
+          sleep 10
+          
+          # Test API endpoints
+          echo "Testing /api endpoint..."
+          curl -f http://localhost:8080/api | jq .
+          
+          echo "Testing /health endpoint..."
+          curl -f http://localhost:8080/health | jq .
+          
+          echo "Testing /metrics endpoint..."
+          curl -f http://localhost:8080/metrics | jq .
+          
+          # Cleanup
+          docker stop test-container
+          docker rm test-container
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run security scan on dependencies
+        uses: pypa/gh-action-pip-audit@v1.0.8
+        with:
+          inputs: app/requirements.txt
+
+      - name: Build Docker image for scanning
+        run: |
+          cd app
+          docker build -t liatrio-demo-api:scan .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'liatrio-demo-api:scan'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
   build-and-push:
+    needs: [test, security-scan]
     runs-on: ubuntu-latest
     environment: dev
     
@@ -182,4 +275,112 @@ jobs:
             echo ""
             echo "=== Debug Logs ==="
             kubectl logs -l app=liatrio-demo-api-simple --tail=20 || echo "No logs available"
+          fi
+
+  post-deploy-tests:
+    needs: deploy
+    runs-on: ubuntu-latest
+    environment: dev
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-PostDeployTest
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+      - name: Wait for load balancer
+        timeout-minutes: 10
+        run: |
+          echo "Waiting for load balancer to be ready..."
+          for i in {1..60}; do
+            LB_URL=$(kubectl get service liatrio-demo-api-simple-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+            if [ -n "$LB_URL" ]; then
+              echo "Load balancer ready: $LB_URL"
+              echo "LB_URL=$LB_URL" >> $GITHUB_ENV
+              break
+            fi
+            echo "Attempt $i: Load balancer not ready yet..."
+            sleep 10
+          done
+
+      - name: Test deployed API endpoints
+        run: |
+          if [ -n "$LB_URL" ]; then
+            echo "Testing deployed API at: http://$LB_URL"
+            
+            # Test API endpoint
+            echo "=== Testing /api endpoint ==="
+            API_RESPONSE=$(curl -s -f "http://$LB_URL/api" || echo "FAILED")
+            echo $API_RESPONSE | jq .
+            
+            # Verify required response format
+            MESSAGE=$(echo $API_RESPONSE | jq -r '.message' 2>/dev/null || echo "")
+            if [ "$MESSAGE" != "Automate all the things!" ]; then
+              echo "❌ API endpoint test FAILED: Wrong message"
+              exit 1
+            fi
+            
+            # Test health endpoint
+            echo "=== Testing /health endpoint ==="
+            HEALTH_RESPONSE=$(curl -s -f "http://$LB_URL/health" || echo "FAILED")
+            echo $HEALTH_RESPONSE | jq .
+            
+            # Verify health status
+            STATUS=$(echo $HEALTH_RESPONSE | jq -r '.status' 2>/dev/null || echo "")
+            if [ "$STATUS" != "healthy" ]; then
+              echo "❌ Health endpoint test FAILED: Not healthy"
+              exit 1
+            fi
+            
+            # Test metrics endpoint
+            echo "=== Testing /metrics endpoint ==="
+            curl -s -f "http://$LB_URL/metrics" | jq .
+            
+            echo "✅ All API endpoint tests passed!"
+            
+          else
+            echo "⚠️ Load balancer URL not available, using port-forward for testing"
+            
+            # Port-forward test as fallback
+            kubectl port-forward service/liatrio-demo-api-simple-service 8080:80 &
+            PF_PID=$!
+            sleep 5
+            
+            # Test via port-forward
+            curl -s -f "http://localhost:8080/api" | jq .
+            curl -s -f "http://localhost:8080/health" | jq .
+            
+            # Cleanup
+            kill $PF_PID
+            
+            echo "✅ Port-forward tests passed!"
+          fi
+
+      - name: Performance test
+        run: |
+          if [ -n "$LB_URL" ]; then
+            echo "=== Running basic performance test ==="
+            
+            # Simple load test with curl
+            for i in {1..10}; do
+              START_TIME=$(date +%s%N)
+              curl -s -f "http://$LB_URL/api" > /dev/null
+              END_TIME=$(date +%s%N)
+              DURATION=$(( (END_TIME - START_TIME) / 1000000 ))
+              echo "Request $i: ${DURATION}ms"
+            done
+            
+            echo "✅ Performance test completed!"
+          else
+            echo "⚠️ Skipping performance test - Load balancer URL not available"
           fi

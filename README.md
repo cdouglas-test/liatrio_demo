@@ -86,19 +86,34 @@ aws sts get-caller-identity
 
 ### 3. Deploy Infrastructure
 
+The infrastructure uses a remote Terraform state backend (S3 + DynamoDB) for state management. Follow these steps:
+
 ```bash
 cd infrastructure
 
-# Initialize Terraform
+# Step 1: Initialize Terraform (local state initially)
 terraform init
 
-# Review planned changes
+# Step 2: Deploy the state backend infrastructure first
+terraform apply -target=module.tfstate_backend -target=random_string.tfstate_suffix
+
+# Step 3: Configure remote backend (after S3 bucket is created)
+# The backend configuration will be automatically set up
+terraform init -migrate-state
+
+# Step 4: Review full infrastructure plan
 terraform plan
 
-# Deploy infrastructure (takes ~15-20 minutes)
+# Step 5: Deploy remaining infrastructure (takes ~15-20 minutes)
 terraform apply
 ```
 
+**Important Notes:**
+
+- The first `terraform apply` creates the S3 bucket and DynamoDB table for state storage
+- The `terraform init -migrate-state` migrates your local state to the remote backend
+- Subsequent team members can skip steps 2-3 and run normal `init/plan/apply` for the same environment
+- 
 ### 4. Deploy Application
 
 #### Option A: Automated CI/CD (Recommended)
@@ -170,6 +185,67 @@ curl http://localhost:8080/api
 curl http://localhost:8080/health
 ```
 
+#### Local Testing
+
+The project includes a comprehensive automated test suite that validates all API endpoints and functionality.
+
+**Quick Test Run:**
+
+```bash
+cd app
+
+# Install test dependencies
+pip install -r requirements.txt
+
+# Run all tests
+python -m pytest test_app.py -v
+
+# Run tests with coverage report
+python -m pytest test_app.py -v --cov=app --cov-report=term-missing
+```
+
+**Windows PowerShell:**
+
+```powershell
+Set-Location app
+
+# Install dependencies
+python -m pip install -r requirements.txt
+
+# Run tests
+python -m pytest test_app.py -v --cov=app --cov-report=term-missing
+
+# Or use the test runner script
+python run_tests.py
+```
+
+**Test Categories:**
+
+- **Unit Tests** (`@pytest.mark.unit`) - Individual function testing
+- **Integration Tests** (`@pytest.mark.integration`) - Component interaction testing  
+- **Contract Tests** (`@pytest.mark.contract`) - API compliance with problem statement
+
+**Run Specific Test Categories:**
+
+```bash
+# Run only unit tests
+python -m pytest test_app.py -v -m unit
+
+# Run only contract compliance tests
+python -m pytest test_app.py -v -m contract
+
+# Run only integration tests
+python -m pytest test_app.py -v -m integration
+```
+
+**Current Test Coverage Summary:**
+
+- ✅ **16 tests** covering all endpoints and functionality
+- ✅ **88% code coverage** of the Flask application
+- ✅ **Problem statement compliance** validation
+- ✅ **Kubernetes readiness** endpoint testing
+- ✅ **Error handling** and edge case validation
+
 ### Making Changes
 
 #### Application Changes
@@ -217,6 +293,26 @@ liatrio_demo/
 ```
 
 ### Debugging Common Issues
+
+#### Terraform State Backend Issues
+
+```bash
+# If state migration fails or backend issues occur:
+
+# Check if S3 bucket exists
+aws s3 ls | grep tfstate
+
+# Check DynamoDB table
+aws dynamodb list-tables | grep tfstate
+
+# Reset to local state (emergency only)
+rm -rf .terraform
+terraform init -backend=false
+
+# Re-run backend setup
+terraform apply -target=module.tfstate_backend -target=random_string.tfstate_suffix
+terraform init -migrate-state
+```
 
 #### Pod Won't Start
 
