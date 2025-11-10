@@ -68,7 +68,7 @@ resource "random_string" "tfstate_suffix" {
   length  = 8
   special = false
   upper   = false
-  
+
   lifecycle {
     ignore_changes = all
   }
@@ -121,7 +121,7 @@ resource "aws_ecr_repository_policy" "app_repo_policy" {
 
 # VPC for EKS cluster
 module "vpc" {
-  source = "terraform-aws-modules/vpc/aws"
+  source  = "terraform-aws-modules/vpc/aws"
   version = "~> 5.0"
 
   name = "${var.project_name}-${var.environment}-vpc"
@@ -131,34 +131,34 @@ module "vpc" {
   private_subnets = slice(var.private_subnet_cidrs, 0, 2)
   public_subnets  = slice(var.public_subnet_cidrs, 0, 2)
 
-  enable_nat_gateway = true
-  enable_vpn_gateway = false
+  enable_nat_gateway   = true
+  enable_vpn_gateway   = false
   enable_dns_hostnames = true
-  enable_dns_support = true
+  enable_dns_support   = true
 
   # Tags required for EKS
   tags = {
-    Name        = "${var.project_name}-${var.environment}-vpc"
-    Project     = var.project_name
-    Environment = var.environment
-    ManagedBy   = "Terraform"
+    Name                                                                                                      = "${var.project_name}-${var.environment}-vpc"
+    Project                                                                                                   = var.project_name
+    Environment                                                                                               = var.environment
+    ManagedBy                                                                                                 = "Terraform"
     "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks-${random_string.tfstate_suffix.result}" = "shared"
   }
 
   public_subnet_tags = {
     "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks-${random_string.tfstate_suffix.result}" = "shared"
-    "kubernetes.io/role/elb" = 1
+    "kubernetes.io/role/elb"                                                                                  = 1
   }
 
   private_subnet_tags = {
     "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks-${random_string.tfstate_suffix.result}" = "shared"
-    "kubernetes.io/role/internal-elb" = 1
+    "kubernetes.io/role/internal-elb"                                                                         = 1
   }
 }
 
 # EKS Cluster
 module "eks" {
-  source = "terraform-aws-modules/eks/aws"
+  source  = "terraform-aws-modules/eks/aws"
   version = "~> 20.0"
 
   cluster_name    = "${var.project_name}-${var.environment}-eks-${random_string.tfstate_suffix.result}"
@@ -168,8 +168,8 @@ module "eks" {
   subnet_ids = module.vpc.private_subnets
 
   # Cluster endpoint configuration
-  cluster_endpoint_public_access  = true
-  cluster_endpoint_private_access = true
+  cluster_endpoint_public_access       = true
+  cluster_endpoint_private_access      = true
   cluster_endpoint_public_access_cidrs = ["0.0.0.0/0"]
 
   cluster_addons = {
@@ -188,13 +188,13 @@ module "eks" {
     main = {
       name           = "${var.project_name}-${var.environment}-nodes"
       instance_types = var.node_instance_types
-      
+
       min_size     = var.node_group_min_size
       max_size     = var.node_group_max_size
       desired_size = var.node_group_desired_size
 
       disk_size = 50
-      
+
       labels = {
         Environment = var.environment
         Project     = var.project_name
@@ -221,7 +221,7 @@ module "eks" {
     admin = {
       kubernetes_groups = []
       principal_arn     = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
-      
+
       policy_associations = {
         admin = {
           policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
@@ -247,7 +247,7 @@ module "eks" {
     delete = "15m"
   }
 }
-    
+
 # Configure providers after EKS cluster creation
 provider "kubernetes" {
   host                   = module.eks.cluster_endpoint
