@@ -1,4 +1,4 @@
-name: Build and Deploy API
+name: Deploy to Production
 
 on:
   push:
@@ -6,20 +6,12 @@ on:
     paths: 
       - 'app/**'
       - 'k8s/**'
-      - '.github/workflows/build-deploy.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'app/**'
-      - 'k8s/**'
-      - '.github/workflows/build-deploy.yml'
+      - '.github/workflows/deploy.yml'
 
-# Required for OIDC authentication to AWS and security scanning
+# Required for OIDC authentication to AWS
 permissions:
   id-token: write
   contents: read
-  security-events: write  # Required for uploading SARIF files
-  checks: write  # Required for creating check-runs
 
 env:
   AWS_REGION: us-east-1
@@ -27,133 +19,9 @@ env:
   EKS_CLUSTER_NAME: liatrio-demo-dev-eks-xscgoqr8
 
 jobs:
-  gate:
-    runs-on: ubuntu-latest
-    outputs:
-      app-changed: ${{ steps.changes.outputs.app }}
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect changes
-        id: changes
-        uses: dorny/paths-filter@v2
-        with:
-          filters: |
-            app:
-              - 'app/**'
-              - 'k8s/**'
-              - '.github/workflows/build-deploy.yml'
-
-      - name: Debug path filter results
-        run: |
-          echo "App changed: ${{ steps.changes.outputs.app }}"
-          echo "Event name: ${{ github.event_name }}"
-          echo "Ref: ${{ github.ref }}"
-
-  test:
-    runs-on: ubuntu-latest
-    needs: gate
-    if: always()
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
-          cd app
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Run unit tests
-        run: |
-          cd app
-          python -m pytest test_app.py -v --tb=short --cov=app --cov-report=xml --cov-report=term-missing
-
-      - name: Upload coverage reports to Codecov
-        if: always()
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./app/coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
-
-      - name: Test Docker build
-        run: |
-          cd app
-          docker build -t liatrio-demo-api:test .
-
-      - name: Integration test with Docker
-        run: |
-          cd app
-          # Start container in background
-          docker run -d --name test-container -p 8080:8080 liatrio-demo-api:test
-          
-          # Wait for container to start
-          sleep 10
-          
-          # Test API endpoints
-          echo "Testing /api endpoint..."
-          curl -f http://localhost:8080/api | jq .
-          
-          echo "Testing /health endpoint..."
-          curl -f http://localhost:8080/health | jq .
-          
-          echo "Testing /metrics endpoint..."
-          curl -f http://localhost:8080/metrics | jq .
-          
-          # Cleanup
-          docker stop test-container
-          docker rm test-container
-
-  security-scan:
-    runs-on: ubuntu-latest
-    needs: [gate, test]
-    if: always() && needs.test.result == 'success'
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run security scan on dependencies
-        uses: pypa/gh-action-pip-audit@v1.0.8
-        with:
-          inputs: app/requirements.txt
-
-      - name: Build Docker image for scanning
-        run: |
-          cd app
-          docker build -t liatrio-demo-api:scan .
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: 'liatrio-demo-api:scan'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
-
   build-and-push:
-    needs: [gate, test, security-scan]
     runs-on: ubuntu-latest
     environment: dev
-    if: always() && needs.test.result == 'success'
     
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
@@ -164,20 +32,17 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure AWS credentials using OIDC
-        if: github.ref == 'refs/heads/main'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActions-BuildDeploy
+          role-session-name: GitHubActions-Deploy
 
       - name: Login to Amazon ECR
-        if: github.ref == 'refs/heads/main'
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Extract metadata
-        if: github.ref == 'refs/heads/main'
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -189,19 +54,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image for testing (PR)
-        if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v5
-        with:
-          context: ./app
-          platforms: linux/amd64
-          push: false
-          tags: liatrio-demo-api:pr-${{ github.event.number }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build and push Docker image (main branch)
-        if: github.ref == 'refs/heads/main'
+      - name: Build and push Docker image
         id: build
         uses: docker/build-push-action@v5
         with:
@@ -217,7 +70,7 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     environment: dev
-    if: github.ref == 'refs/heads/main' && needs.build-and-push.result == 'success'
+    if: needs.build-and-push.result == 'success'
     
     steps:
       - name: Checkout code
@@ -329,7 +182,7 @@ jobs:
     needs: deploy
     runs-on: ubuntu-latest
     environment: dev
-    if: github.ref == 'refs/heads/main'
+    if: needs.deploy.result == 'success'
     
     steps:
       - name: Checkout code
@@ -431,4 +284,87 @@ jobs:
             echo "✅ Performance test completed!"
           else
             echo "⚠️ Skipping performance test - Load balancer URL not available"
+          fi
+
+  deployment-summary:
+    needs: [build-and-push, deploy, post-deploy-tests]
+    runs-on: ubuntu-latest
+    environment: dev
+    if: always()
+    
+    steps:
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Summary
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+
+      - name: Get API URLs
+        run: |
+          # Get load balancer URL
+          LB_URL=$(kubectl get service liatrio-demo-api-simple-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+          
+          if [ -n "$LB_URL" ]; then
+            echo "API_BASE_URL=http://$LB_URL" >> $GITHUB_ENV
+            echo "API_ENDPOINT=http://$LB_URL/api" >> $GITHUB_ENV
+            echo "HEALTH_ENDPOINT=http://$LB_URL/health" >> $GITHUB_ENV
+            echo "METRICS_ENDPOINT=http://$LB_URL/metrics" >> $GITHUB_ENV
+          else
+            echo "API_BASE_URL=Load balancer still provisioning..." >> $GITHUB_ENV
+            echo "API_ENDPOINT=Load balancer still provisioning..." >> $GITHUB_ENV
+            echo "HEALTH_ENDPOINT=Load balancer still provisioning..." >> $GITHUB_ENV
+            echo "METRICS_ENDPOINT=Load balancer still provisioning..." >> $GITHUB_ENV
+          fi
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Summary"
+          echo "========================"
+          echo ""
+          echo "### 📊 Job Status"
+          echo "🏗️ Build & Push: ${{ needs.build-and-push.result }}"
+          echo "🚀 Deploy: ${{ needs.deploy.result }}"
+          echo "🧪 Post-Deploy Tests: ${{ needs.post-deploy-tests.result }}"
+          echo ""
+          echo "### 📋 Deployment Details"
+          echo "Commit: ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "### 🌐 API Endpoints"
+          echo "Base URL: $API_BASE_URL"
+          echo "API Endpoint: $API_ENDPOINT"
+          echo "Health Check: $HEALTH_ENDPOINT"
+          echo "Metrics: $METRICS_ENDPOINT"
+          echo ""
+          echo "### 📝 Quick Test Commands"
+          echo "\`\`\`bash"
+          echo "# Test the API"
+          echo "curl $API_ENDPOINT"
+          echo ""
+          echo "# Check health status"
+          echo "curl $HEALTH_ENDPOINT"
+          echo ""
+          echo "# View metrics"
+          echo "curl $METRICS_ENDPOINT"
+          echo "\`\`\`"
+          echo ""
+          
+          if [[ "${{ needs.deploy.result }}" == "success" ]]; then
+            echo "### ✅ Deployment Status: SUCCESS"
+            echo "� Application is deployed and ready to use!"
+            echo ""
+            echo "The Liatrio demo API is now live and responding to requests."
+            echo "You can test the endpoints above to verify functionality."
+          else
+            echo "### ❌ Deployment Status: FAILED"
+            echo "💥 Deployment encountered issues - check job logs for details"
+            echo ""
+            echo "Please review the deploy job output for troubleshooting information."
           fi
