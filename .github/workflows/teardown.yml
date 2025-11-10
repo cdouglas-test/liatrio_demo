@@ -21,6 +21,7 @@ on:
 permissions:
   id-token: write
   contents: read
+  actions: write  # Required for workflow dispatch
 
 env:
   AWS_REGION: us-east-1
@@ -153,10 +154,10 @@ jobs:
           aws ec2 describe-vpcs --region ${{ env.AWS_REGION }} --filters "Name=tag:Project,Values=liatrio-demo" || echo "No project VPCs found"
 
   cleanup-state:
-    needs: [teardown-infrastructure]
+    needs: [validate-input, teardown-infrastructure]
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
-    if: needs.validate-input.outputs.should-destroy == 'true'
+    if: needs.validate-input.outputs.should-destroy == 'true' && needs.teardown-infrastructure.result == 'success'
     
     steps:
       - name: Configure AWS credentials using OIDC
@@ -179,7 +180,7 @@ jobs:
           echo "Skipping automatic state cleanup for safety..."
 
   notify-completion:
-    needs: [teardown-application, teardown-infrastructure, cleanup-state]
+    needs: [validate-input, teardown-application, teardown-infrastructure, cleanup-state]
     runs-on: ubuntu-latest
     if: always() && needs.validate-input.outputs.should-destroy == 'true'
     
