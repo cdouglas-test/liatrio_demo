@@ -60,6 +60,7 @@ module "tfstate_backend" {
     Environment = var.environment
     Purpose     = "Terraform State Backend"
     ManagedBy   = "Terraform"
+    test        = "tag-value"
   }
 }
 
