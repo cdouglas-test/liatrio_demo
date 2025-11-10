@@ -1,0 +1,216 @@
+name: Teardown Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: 'Type "DESTROY" to confirm teardown'
+        required: true
+        default: ''
+      environment:
+        description: 'Environment to teardown'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - staging
+        - prod
+
+# Required for OIDC authentication to AWS
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  validate-input:
+    runs-on: ubuntu-latest
+    outputs:
+      should-destroy: ${{ steps.check.outputs.destroy }}
+    
+    steps:
+      - name: Validate destroy confirmation
+        id: check
+        run: |
+          if [ "${{ github.event.inputs.confirm_destroy }}" = "DESTROY" ]; then
+            echo "destroy=true" >> $GITHUB_OUTPUT
+            echo "✅ Destruction confirmed"
+          else
+            echo "destroy=false" >> $GITHUB_OUTPUT
+            echo "❌ Invalid confirmation. Please type 'DESTROY' to confirm."
+            exit 1
+          fi
+
+  teardown-application:
+    needs: validate-input
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    if: needs.validate-input.outputs.should-destroy == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-Teardown
+
+      - name: Update kubeconfig
+        run: |
+          # Try to update kubeconfig, but don't fail if cluster doesn't exist
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name liatrio-demo-${{ github.event.inputs.environment }}-eks-* || echo "EKS cluster not found or already deleted"
+
+      - name: Delete Kubernetes resources
+        run: |
+          echo "🧹 Cleaning up Kubernetes deployments..."
+          
+          # Delete all application resources
+          kubectl delete deployment --all --timeout=60s || echo "No deployments found"
+          kubectl delete service --all --timeout=60s || echo "No services found"
+          kubectl delete ingress --all --timeout=60s || echo "No ingresses found"
+          kubectl delete pod --all --timeout=60s || echo "No pods found"
+          
+          # Wait for cleanup
+          echo "Waiting for resources to be deleted..."
+          sleep 30
+          
+          # Show remaining resources
+          echo "Remaining resources:"
+          kubectl get all || echo "No resources remaining"
+
+  teardown-infrastructure:
+    needs: [validate-input, teardown-application]
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    if: needs.validate-input.outputs.should-destroy == 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ~1.0
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-TerraformDestroy
+
+      - name: Terraform Init
+        run: |
+          cd infrastructure
+          terraform init
+
+      - name: Terraform Plan Destroy
+        run: |
+          cd infrastructure
+          echo "📋 Planning infrastructure destruction..."
+          terraform plan -destroy -out=destroy.tfplan
+          
+          echo "Resources to be destroyed:"
+          terraform show -no-color destroy.tfplan
+
+      - name: Terraform Destroy
+        run: |
+          cd infrastructure
+          echo "💥 Destroying infrastructure..."
+          echo "This will delete:"
+          echo "- EKS cluster and node groups"
+          echo "- VPC and networking components"
+          echo "- ECR repository (images will be deleted)"
+          echo "- S3 bucket for Terraform state"
+          echo "- DynamoDB table for state locking"
+          echo ""
+          
+          terraform apply destroy.tfplan
+          
+          echo "✅ Infrastructure destruction completed!"
+
+      - name: Verify cleanup
+        run: |
+          echo "🔍 Verifying resource cleanup..."
+          
+          # Check for remaining EKS clusters
+          echo "Checking for EKS clusters..."
+          aws eks list-clusters --region ${{ env.AWS_REGION }} || echo "No EKS clusters found"
+          
+          # Check for ECR repositories
+          echo "Checking for ECR repositories..."
+          aws ecr describe-repositories --region ${{ env.AWS_REGION }} --repository-names liatrio-demo-${{ github.event.inputs.environment }}-api || echo "ECR repository not found"
+          
+          # Check for VPCs (will show default VPC)
+          echo "Checking for project VPCs..."
+          aws ec2 describe-vpcs --region ${{ env.AWS_REGION }} --filters "Name=tag:Project,Values=liatrio-demo" || echo "No project VPCs found"
+
+  cleanup-state:
+    needs: [teardown-infrastructure]
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    if: needs.validate-input.outputs.should-destroy == 'true'
+    
+    steps:
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-StateCleanup
+
+      - name: Clean up Terraform state (Optional)
+        run: |
+          echo "⚠️  Optional: Clean up Terraform state backend"
+          echo "Note: This will delete the S3 bucket and DynamoDB table used for Terraform state"
+          echo "Only run this if you want to completely reset the project"
+          echo ""
+          echo "To manually clean up state backend:"
+          echo "1. Delete S3 bucket: aws s3 rb s3://liatrio-demo-${{ github.event.inputs.environment }}-tfstate-* --force"
+          echo "2. Delete DynamoDB table: aws dynamodb delete-table --table-name liatrio-demo-${{ github.event.inputs.environment }}-tfstate-lock-*"
+          echo ""
+          echo "Skipping automatic state cleanup for safety..."
+
+  notify-completion:
+    needs: [teardown-application, teardown-infrastructure, cleanup-state]
+    runs-on: ubuntu-latest
+    if: always() && needs.validate-input.outputs.should-destroy == 'true'
+    
+    steps:
+      - name: Teardown Summary
+        run: |
+          echo "🎯 Teardown Summary"
+          echo "==================="
+          echo ""
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          
+          if [ "${{ needs.teardown-application.result }}" = "success" ]; then
+            echo "✅ Application cleanup: SUCCESS"
+          else
+            echo "❌ Application cleanup: FAILED"
+          fi
+          
+          if [ "${{ needs.teardown-infrastructure.result }}" = "success" ]; then
+            echo "✅ Infrastructure destruction: SUCCESS"
+          else
+            echo "❌ Infrastructure destruction: FAILED"
+          fi
+          
+          echo ""
+          echo "💰 Cost Impact: All billable resources should now be deleted"
+          echo "🔒 Security: All project resources have been removed"
+          echo ""
+          echo "Next steps:"
+          echo "- Monitor AWS billing to confirm resource deletion"
+          echo "- Clean up any remaining state files if desired"
+          echo "- Remove GitHub environment secrets if no longer needed"

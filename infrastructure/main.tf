@@ -179,8 +179,6 @@ module "eks" {
     kube-proxy = {
       most_recent = true
     }
-    # coredns will be added automatically by EKS
-    # aws-ebs-csi-driver removed to avoid timeout issues
   }
 
   # EKS Managed Node Groups
@@ -217,7 +215,7 @@ module "eks" {
   }
 
   # Cluster access entry
-  access_entries = {
+  access_entries = merge({
     admin = {
       kubernetes_groups = []
       principal_arn     = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
@@ -231,7 +229,21 @@ module "eks" {
         }
       }
     }
-  }
+    }, var.github_actions_role_arn != "" ? {
+    github_actions = {
+      kubernetes_groups = []
+      principal_arn     = var.github_actions_role_arn
+
+      policy_associations = {
+        admin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+  } : {})
 
   tags = {
     Name        = "${var.project_name}-${var.environment}-eks"
