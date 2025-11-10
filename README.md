@@ -113,7 +113,7 @@ terraform apply
 - The first `terraform apply` creates the S3 bucket and DynamoDB table for state storage
 - The `terraform init -migrate-state` migrates your local state to the remote backend
 - Subsequent team members can skip steps 2-3 and run normal `init/plan/apply` for the same environment
-
+- 
 ### 4. Deploy Application
 
 #### Option A: Automated CI/CD (Recommended)
