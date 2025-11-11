@@ -145,20 +145,18 @@ python -m pytest test_app.py -v -m contract  # API compliance
 
 **Test Coverage:** 24+ test cases, 90%+ code coverage, includes unit/integration/contract/security testing
 
-## Commit Conventions & Automated Releases
+## PR Title Conventions & Automated Releases
 
-This project uses **semantic versioning** with automated releases based on commit message conventions. Follow these commit formats to trigger proper version bumps and releases:
+This project uses **semantic versioning** with automated releases based on PR title conventions. Follow these PR title formats to trigger proper version bumps and releases when your PR is merged:
 
-### Commit Message Format
+### PR Title Format
 ```
 <type>: <description>
 
-[optional body]
-
-[optional footer]
+[optional scope in parentheses]
 ```
 
-### Commit Types
+### PR Title Types
 - **`feat:`** New features → **Minor version bump** (v1.1.0)
 - **`fix:`** Bug fixes → **Patch version bump** (v1.0.1)  
 - **`docs:`** Documentation changes → No version bump
@@ -171,23 +169,37 @@ This project uses **semantic versioning** with automated releases based on commi
 ### Examples
 ```bash
 # Patch release (v1.0.1)
-git commit -m "fix: resolve API timeout issue in health endpoint"
+PR Title: "fix: resolve API timeout issue in health endpoint"
 
 # Minor release (v1.1.0) 
-git commit -m "feat: add new metrics endpoint for monitoring"
+PR Title: "feat: add new metrics endpoint for monitoring"
 
 # Major release (v2.0.0)
-git commit -m "feat: update API to v2 format
-
-BREAKING CHANGE: API response format changed from {data} to {result, metadata}"
+PR Title: "feat!: update API to v2 format"
+# OR
+PR Title: "feat: update API with breaking changes"
 
 # No release
-git commit -m "docs: update README with deployment examples"
+PR Title: "docs: update README with deployment examples"
+
+# With scope
+PR Title: "feat(api): add user authentication system"
+PR Title: "fix(auth): resolve login timeout issue"
+```
+
+### Commit Message Freedom
+Within your PR, **commit messages can be flexible** - focus on clear development history:
+```bash
+# These commits are fine within a PR titled "feat: add user auth"
+git commit -m "add login endpoint"
+git commit -m "implement JWT validation"  
+git commit -m "fix typo in error message"
+git commit -m "add tests for auth flow"
 ```
 
 ### Automated Workflows
-- **Pull Requests:** Build and test without deploying
-- **Main Branch:** Full CI/CD pipeline with automated versioning and deployment
+- **Pull Requests:** PR title validation, build and test without deploying
+- **Main Branch:** Full CI/CD pipeline with automatic versioning based on PR title
 - **Release Creation:** Automatic GitHub releases with generated changelogs
 - **Container Tagging:** Docker images tagged with semantic versions (v1.2.3)
 
@@ -235,8 +247,8 @@ cd infrastructure && terraform destroy
 
 1. Fork repository and create feature branch
 2. Make changes and test locally using `python run_tests.py`
-3. **Follow commit conventions** (see Commit Conventions section above)
-4. Submit pull request with descriptive title and conventional commit messages
+3. **Use conventional PR titles** (see PR Title Conventions section above)
+4. Submit pull request with descriptive conventional title
 
 1. Fork repository and create feature branch
 2. Make changes and test locally using `python run_tests.py`
