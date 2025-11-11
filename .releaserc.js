@@ -10,7 +10,7 @@ module.exports = {
     [
       '@semantic-release/commit-analyzer',
       {
-        preset: 'conventionalcommits',
+        preset: 'angular',
         releaseRules: [
           // Custom rules for PR-based workflow
           { breaking: true, release: 'major' },
@@ -34,7 +34,7 @@ module.exports = {
     [
       '@semantic-release/release-notes-generator',
       {
-        preset: 'conventionalcommits',
+        preset: 'angular',
         presetConfig: {
           types: [
             { type: 'feat', section: 'Features' },
