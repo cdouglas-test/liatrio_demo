@@ -67,6 +67,20 @@ def metrics():
         "port": PORT
     })
 
+@app.route('/version', methods=['GET'])
+def version():
+    """Version endpoint for semantic release testing"""
+    return jsonify({
+        "service": "liatrio-demo-api",
+        "version": "1.0.0",
+        "semantic_release": "enabled",
+        "build_info": {
+            "timestamp": int(time.time()),
+            "environment": os.environ.get('ENVIRONMENT', 'development')
+        },
+        "message": "Semantic release testing endpoint"
+    })
+
 @app.errorhandler(404)
 def not_found(error):
     """Handle 404 errors"""
