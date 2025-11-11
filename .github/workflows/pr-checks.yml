@@ -1,117 +1,25 @@
-name: Pre-merge Checks
+name: PR Checks
 
 on:
   pull_request:
     branches: [main]
     # Remove path filters to run on every PR
 
-# Required for security scanning
+# Required for security scanning and terraform validation
 permissions:
+  id-token: write  # Required for OIDC authentication to AWS
   contents: read
   security-events: write  # Required for uploading SARIF files
   checks: write  # Required for creating check-runs
 
 env:
   AWS_REGION: us-east-1
+  TF_VERSION: '1.9.0'
+  TFLINT_VERSION: 'v0.50.3'
 
 jobs:
-  gate:
-    runs-on: ubuntu-latest
-    outputs:
-      app-changed: ${{ steps.changes.outputs.app }}
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect changes
-        id: changes
-        uses: dorny/paths-filter@v2
-        with:
-          filters: |
-            app:
-              - 'app/**'
-              - 'k8s/**'
-              - '.github/workflows/*.yml'
-
-      - name: Debug path filter results
-        run: |
-          echo "App changed: ${{ steps.changes.outputs.app }}"
-          echo "Event name: ${{ github.event_name }}"
-          echo "Ref: ${{ github.ref }}"
-
-      - name: Create success check for test job if not needed
-        if: steps.changes.outputs.app != 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const checkName = 'test';
-            const conclusion = 'success';
-            
-            await github.rest.checks.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              name: checkName,
-              head_sha: context.sha,
-              status: 'completed',
-              conclusion: conclusion,
-              output: {
-                title: 'Test job skipped',
-                summary: 'No application code changes detected. Test job marked as successful.',
-                text: 'This check was automatically created because no files in app/, k8s/, or workflow files were modified.'
-              }
-            });
-
-      - name: Create success check for security-scan job if not needed
-        if: steps.changes.outputs.app != 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const checkName = 'security-scan';
-            const conclusion = 'success';
-            
-            await github.rest.checks.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              name: checkName,
-              head_sha: context.sha,
-              status: 'completed',
-              conclusion: conclusion,
-              output: {
-                title: 'Security scan job skipped',
-                summary: 'No application code changes detected. Security scan job marked as successful.',
-                text: 'This check was automatically created because no files in app/, k8s/, or workflow files were modified.'
-              }
-            });
-
-      - name: Create success check for build-test job if not needed
-        if: steps.changes.outputs.app != 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const checkName = 'build-test';
-            const conclusion = 'success';
-            
-            await github.rest.checks.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              name: checkName,
-              head_sha: context.sha,
-              status: 'completed',
-              conclusion: conclusion,
-              output: {
-                title: 'Build test job skipped',
-                summary: 'No application code changes detected. Build test job marked as successful.',
-                text: 'This check was automatically created because no files in app/, k8s/, or workflow files were modified.'
-              }
-            });
-
   test:
     runs-on: ubuntu-latest
-    needs: gate
-    if: needs.gate.outputs.app-changed == 'true'
     
     steps:
       - name: Checkout code
@@ -173,8 +81,7 @@ jobs:
 
   security-scan:
     runs-on: ubuntu-latest
-    needs: [gate, test]
-    if: needs.gate.outputs.app-changed == 'true' && needs.test.result == 'success'
+    needs: test
     
     steps:
       - name: Checkout code
@@ -204,9 +111,8 @@ jobs:
           sarif_file: 'trivy-results.sarif'
 
   build-test:
-    needs: [gate, test, security-scan]
+    needs: [test, security-scan]
     runs-on: ubuntu-latest
-    if: needs.gate.outputs.app-changed == 'true' && needs.test.result == 'success'
     
     steps:
       - name: Checkout code
@@ -239,8 +145,84 @@ jobs:
           docker stop pr-test
           docker rm pr-test
 
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    environment: dev
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-TerraformValidation
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        working-directory: ./infrastructure
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: terraform init
+        working-directory: ./infrastructure
+        env:
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate
+        working-directory: ./infrastructure
+
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -no-color
+        working-directory: ./infrastructure
+        continue-on-error: true
+        env:
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
+
+  tflint:
+    name: TFLint
+    runs-on: ubuntu-latest
+    environment: dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache plugin dir
+        uses: actions/cache@v4
+        with:
+          path: ~/.tflint.d/plugins
+          key: ${{ runner.os }}-tflint-${{ hashFiles('.tflint.hcl') }}
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+
+      - name: Show TFLint version
+        run: tflint --version
+
+      - name: Init TFLint
+        run: tflint --init
+
+      - name: Run TFLint
+        run: tflint -f compact
+
   pr-summary:
-    needs: [gate, test, security-scan, build-test]
+    needs: [test, security-scan, build-test, terraform-plan, tflint]
     runs-on: ubuntu-latest
     if: always()
     
@@ -250,13 +232,14 @@ jobs:
           echo "## Pre-merge Check Results"
           echo "=========================="
           echo ""
-          echo "🔍 Gate: ${{ needs.gate.result }}"
           echo "🧪 Tests: ${{ needs.test.result }}"
           echo "🛡️ Security Scan: ${{ needs.security-scan.result }}"
           echo "🏗️ Build Test: ${{ needs.build-test.result }}"
+          echo "🏗️ Terraform Plan: ${{ needs.terraform-plan.result }}"
+          echo "🔍 TFLint: ${{ needs.tflint.result }}"
           echo ""
           
-          if [[ "${{ needs.test.result }}" == "success" && "${{ needs.security-scan.result }}" == "success" && "${{ needs.build-test.result }}" == "success" ]]; then
+          if [[ "${{ needs.test.result }}" == "success" && "${{ needs.security-scan.result }}" == "success" && "${{ needs.build-test.result }}" == "success" && "${{ needs.terraform-plan.result }}" == "success" && "${{ needs.tflint.result }}" == "success" ]]; then
             echo "✅ All checks passed - Ready for merge!"
           else
             echo "❌ Some checks failed - Review required"
