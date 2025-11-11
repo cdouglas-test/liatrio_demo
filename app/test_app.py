@@ -97,7 +97,7 @@ class TestAPIEndpoints:
         assert response.status_code == 200
         
         data = json.loads(response.data)
-        assert data['message'] == "test"
+        assert data['message'] == "tested"
         assert 'timestamp' in data
 
     @pytest.mark.unit
