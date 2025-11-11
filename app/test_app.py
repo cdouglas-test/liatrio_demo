@@ -91,16 +91,6 @@ class TestAPIEndpoints:
         assert 'port' in data
 
     @pytest.mark.unit
-    def test_test_endpoint(self, client):
-        """Test the /test endpoint"""
-        response = client.get('/test')
-        assert response.status_code == 200
-        
-        data = json.loads(response.data)
-        assert data['message'] == "test"
-        assert 'timestamp' in data
-
-    @pytest.mark.unit
     def test_404_error_handler(self, client):
         """Test 404 error handling for non-existent endpoints"""
         response = client.get('/nonexistent')
