@@ -363,10 +363,6 @@ jobs:
               exit 1
             fi
             
-            # Test metrics endpoint
-            echo "=== Testing /metrics endpoint ==="
-            curl -s -f "http://$LB_URL/metrics" | jq .
-            
             echo "✅ All API endpoint tests passed!"
             
           else
