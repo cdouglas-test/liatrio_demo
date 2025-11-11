@@ -35,7 +35,7 @@ def api():
         "timestamp": int(time.time())
     })
 
-@app.route('/test', methods=['GET'])
+@app.route('/tested', methods=['GET'])
 def test():
     """Main API endpoint as specified in the problem statement"""
     return jsonify({
