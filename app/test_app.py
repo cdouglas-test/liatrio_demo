@@ -77,20 +77,6 @@ class TestAPIEndpoints:
         assert isinstance(data['timestamp'], int)
 
     @pytest.mark.unit
-    def test_metrics_endpoint(self, client):
-        """Test the metrics endpoint returns service information"""
-        response = client.get('/metrics')
-        assert response.status_code == 200
-        
-        data = json.loads(response.data)
-        assert data['service'] == "liatrio-demo-api"
-        assert data['version'] == "1.0.0"
-        assert 'environment' in data
-        assert 'timestamp' in data
-        assert 'host' in data
-        assert 'port' in data
-
-    @pytest.mark.unit
     def test_version_endpoint(self, client):
         """Test the new version endpoint for semantic release testing"""
         response = client.get('/version')
@@ -129,7 +115,7 @@ class TestAPIEndpoints:
     @pytest.mark.unit
     def test_response_headers_json(self, client):
         """Test that all responses have correct JSON content type"""
-        endpoints = ['/', '/api', '/health', '/metrics', '/test']
+        endpoints = ['/', '/api', '/health', '/test']
         
         for endpoint in endpoints:
             response = client.get(endpoint)
@@ -155,9 +141,9 @@ class TestAPIEndpoints:
         # Test with different environment
         os.environ['ENVIRONMENT'] = 'test'
         
-        response = client.get('/metrics')
+        response = client.get('/version')
         data = json.loads(response.data)
-        assert data['environment'] == 'test'
+        assert data['build_info']['environment'] == 'test'
 
     @pytest.mark.integration
     def test_api_idempotency(self, client):
@@ -217,12 +203,12 @@ class TestAPIContract:
     @pytest.mark.contract
     def test_monitoring_capabilities(self, client):
         """Test monitoring and observability endpoints"""
-        # Metrics endpoint should be available
-        response = client.get('/metrics')
+        # Version endpoint should provide service information
+        response = client.get('/version')
         assert response.status_code == 200
         
         data = json.loads(response.data)
-        required_fields = ['service', 'version', 'environment', 'timestamp']
+        required_fields = ['service', 'version', 'build_info']
         for field in required_fields:
             assert field in data
 

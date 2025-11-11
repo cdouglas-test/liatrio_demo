@@ -22,8 +22,7 @@ def root():
         "endpoints": {
             "/": "Welcome endpoint",
             "/api": "Main API endpoint", 
-            "/health": "Health check endpoint",
-            "/metrics": "Service metrics"
+            "/health": "Health check endpoint"
         },
         "timestamp": int(time.time())
     })
@@ -54,18 +53,6 @@ def health():
         "timestamp": int(time.time()),
         "uptime": datetime.now().isoformat()
     }), 200
-
-@app.route('/metrics', methods=['GET'])
-def metrics():
-    """Basic metrics endpoint for monitoring"""
-    return jsonify({
-        "service": "liatrio-demo-api",
-        "version": "1.0.0",
-        "environment": os.environ.get('ENVIRONMENT', 'development'),
-        "timestamp": int(time.time()),
-        "host": HOST,
-        "port": PORT
-    })
 
 @app.route('/version', methods=['GET'])
 def version():
