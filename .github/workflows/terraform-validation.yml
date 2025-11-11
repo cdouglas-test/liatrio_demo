@@ -3,10 +3,7 @@ name: Terraform Validation
 on:
   pull_request:
     branches: [ main ]
-    paths:
-      - '**/*.tf'
-      - '**/*.tfvars'
-      - '**/*.hcl'
+    # Remove path filters to run on every PR
 
 # Required for OIDC authentication to AWS
 permissions:
