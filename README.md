@@ -4,7 +4,7 @@ Enterprise Flask API with automated AWS EKS deployment, demonstrating modern Dev
 
 ## Features
 
-- **Flask REST API** with `/api`, `/health`, `/metrics` endpoints
+- **Flask REST API** with `/api`, `/health` endpoints
 - **AWS EKS Deployment** with Terraform Infrastructure as Code
 - **Automated CI/CD** with GitHub Actions, security scanning, and OIDC auth
 - **Comprehensive Testing** - unit, integration, contract, and security validation
