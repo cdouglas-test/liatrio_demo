@@ -9,10 +9,42 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  EKS_CLUSTER_NAME: liatrio-demo-dev-eks-xscgoqr8
 
 jobs:
+  get-infrastructure-info:
+    runs-on: ubuntu-latest
+    environment: dev
+    outputs:
+      eks-cluster-name: ${{ steps.terraform-output.outputs.eks_cluster_name }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-TerraformOutput
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.0'
+          terraform_wrapper: false
+
+      - name: Get Terraform outputs
+        id: terraform-output
+        run: |
+          cd infrastructure
+          terraform init
+          EKS_CLUSTER_NAME=$(terraform output -raw eks_cluster_name)
+          echo "EKS Cluster Name: $EKS_CLUSTER_NAME"
+          echo "eks_cluster_name=$EKS_CLUSTER_NAME" >> $GITHUB_OUTPUT
+
   debug:
+    needs: get-infrastructure-info
     runs-on: ubuntu-latest
     environment: dev
     
@@ -26,7 +58,7 @@ jobs:
 
       - name: Update kubeconfig
         run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ needs.get-infrastructure-info.outputs.eks-cluster-name }}
 
       - name: Debug deployment
         run: |

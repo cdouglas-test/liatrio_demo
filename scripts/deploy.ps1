@@ -4,7 +4,7 @@
 param(
     [string]$AwsRegion = "us-east-1",
     [string]$EcrRepository = "liatrio-demo-dev-api",
-    [string]$EksClusterName = "liatrio-demo-dev-eks-xscgoqr8",
+    [string]$EksClusterName = "",  # Will be retrieved from Terraform output
     [string]$ImageTag = "manual-$(Get-Date -Format 'yyyyMMddHHmmss')"
 )
 
@@ -13,6 +13,25 @@ $ErrorActionPreference = "Stop"
 Write-Host "Starting deployment process..." -ForegroundColor Green
 Write-Host "Region: $AwsRegion" -ForegroundColor Cyan
 Write-Host "ECR Repository: $EcrRepository" -ForegroundColor Cyan
+
+# Get EKS cluster name from Terraform output if not provided
+if ([string]::IsNullOrEmpty($EksClusterName)) {
+    Write-Host "Getting EKS cluster name from Terraform output..." -ForegroundColor Yellow
+    Push-Location infrastructure
+    try {
+        terraform init -input=false
+        $EksClusterName = terraform output -raw eks_cluster_name
+        Write-Host "Retrieved EKS cluster name: $EksClusterName" -ForegroundColor Green
+    }
+    catch {
+        Write-Error "Failed to get EKS cluster name from Terraform: $_"
+        exit 1
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 Write-Host "EKS Cluster: $EksClusterName" -ForegroundColor Cyan
 Write-Host "Image Tag: $ImageTag" -ForegroundColor Cyan
 

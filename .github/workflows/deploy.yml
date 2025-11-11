@@ -18,7 +18,6 @@ permissions:
 env:
   AWS_REGION: us-east-1
   ECR_REPOSITORY: liatrio-demo-dev-api
-  EKS_CLUSTER_NAME: liatrio-demo-dev-eks-xscgoqr8
 
 jobs:
   semantic-release:
@@ -74,8 +73,51 @@ jobs:
             echo "Will deploy using existing version tags"
           fi
 
+  get-infrastructure-info:
+    runs-on: ubuntu-latest
+    environment: dev
+    outputs:
+      eks-cluster-name: ${{ steps.terraform-output.outputs.eks_cluster_name }}
+      ecr-repository-url: ${{ steps.terraform-output.outputs.ecr_repository_url }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: GitHubActions-TerraformOutput
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.0'
+          terraform_wrapper: false
+
+      - name: Get Terraform outputs
+        id: terraform-output
+        run: |
+          cd infrastructure
+          
+          # Initialize Terraform
+          terraform init
+          
+          # Get outputs
+          EKS_CLUSTER_NAME=$(terraform output -raw eks_cluster_name)
+          ECR_REPOSITORY_URL=$(terraform output -raw ecr_repository_url)
+          
+          echo "EKS Cluster Name: $EKS_CLUSTER_NAME"
+          echo "ECR Repository URL: $ECR_REPOSITORY_URL"
+          
+          # Set outputs
+          echo "eks_cluster_name=$EKS_CLUSTER_NAME" >> $GITHUB_OUTPUT
+          echo "ecr_repository_url=$ECR_REPOSITORY_URL" >> $GITHUB_OUTPUT
+
   build-and-push:
-    needs: semantic-release
+    needs: [semantic-release, get-infrastructure-info]
     runs-on: ubuntu-latest
     environment: dev
     
@@ -136,7 +178,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    needs: build-and-push
+    needs: [build-and-push, get-infrastructure-info, semantic-release]
     runs-on: ubuntu-latest
     environment: dev
     if: needs.build-and-push.result == 'success'
@@ -158,7 +200,7 @@ jobs:
 
       - name: Update kubeconfig
         run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ needs.get-infrastructure-info.outputs.eks-cluster-name }}
 
       - name: Deploy to EKS
         run: |
@@ -257,7 +299,7 @@ jobs:
           fi
 
   post-deploy-tests:
-    needs: deploy
+    needs: [deploy, get-infrastructure-info]
     runs-on: ubuntu-latest
     environment: dev
     if: needs.deploy.result == 'success'
@@ -275,7 +317,7 @@ jobs:
 
       - name: Update kubeconfig
         run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ needs.get-infrastructure-info.outputs.eks-cluster-name }}
 
       - name: Wait for load balancer
         timeout-minutes: 10
@@ -365,7 +407,7 @@ jobs:
           fi
 
   deployment-summary:
-    needs: [semantic-release, build-and-push, deploy, post-deploy-tests]
+    needs: [semantic-release, build-and-push, deploy, post-deploy-tests, get-infrastructure-info]
     runs-on: ubuntu-latest
     environment: dev
     if: always()
@@ -380,7 +422,7 @@ jobs:
 
       - name: Update kubeconfig
         run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
+          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ needs.get-infrastructure-info.outputs.eks-cluster-name }}
 
       - name: Get API URLs
         run: |

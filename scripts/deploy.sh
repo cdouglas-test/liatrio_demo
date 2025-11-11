@@ -8,12 +8,23 @@ set -e
 # Configuration
 AWS_REGION=${AWS_REGION:-"us-east-1"}
 ECR_REPOSITORY=${ECR_REPOSITORY:-"liatrio-demo-dev-api"}
-EKS_CLUSTER_NAME=${EKS_CLUSTER_NAME:-"liatrio-demo-dev-eks"}
+EKS_CLUSTER_NAME=${EKS_CLUSTER_NAME:-""}  # Will be retrieved from Terraform output
 IMAGE_TAG=${IMAGE_TAG:-"manual-$(date +%Y%m%d%H%M%S)"}
 
 echo "🚀 Starting deployment process..."
 echo "Region: $AWS_REGION"
 echo "ECR Repository: $ECR_REPOSITORY"
+
+# Get EKS cluster name from Terraform output if not provided
+if [ -z "$EKS_CLUSTER_NAME" ]; then
+    echo "📋 Getting EKS cluster name from Terraform output..."
+    pushd infrastructure > /dev/null
+    terraform init -input=false
+    EKS_CLUSTER_NAME=$(terraform output -raw eks_cluster_name)
+    popd > /dev/null
+    echo "✅ Retrieved EKS cluster name: $EKS_CLUSTER_NAME"
+fi
+
 echo "EKS Cluster: $EKS_CLUSTER_NAME"
 echo "Image Tag: $IMAGE_TAG"
 
