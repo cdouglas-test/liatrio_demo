@@ -8,7 +8,10 @@ on:
       - 'k8s/**'
       - '.github/workflows/deploy.yml'
 
-# Required for OIDC authentication to AWS
+# Semantic release analyzes merged PR titles and commits to determine versioning
+# Uses PR-level conventional commit analysis for logical releases per feature
+
+# Required for OIDC authentication to AWS and semantic release
 permissions:
   id-token: write
   contents: read
@@ -19,7 +22,64 @@ env:
   EKS_CLUSTER_NAME: liatrio-demo-dev-eks-xscgoqr8
 
 jobs:
+  semantic-release:
+    runs-on: ubuntu-latest
+    outputs:
+      new-release-published: ${{ steps.semantic.outputs.new_release_published }}
+      new-release-version: ${{ steps.semantic.outputs.new_release_version }}
+      new-release-git-tag: ${{ steps.semantic.outputs.new_release_git_tag }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Semantic Release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          semantic_version: 19
+          extra_plugins: |
+            @semantic-release/changelog@6.0.0
+            @semantic-release/git@10.0.0
+
+      - name: Release Summary
+        run: |
+          echo "=== Semantic Release Summary ==="
+          echo "New release published: ${{ steps.semantic.outputs.new_release_published }}"
+          echo "New release version: ${{ steps.semantic.outputs.new_release_version }}"
+          echo "New release git tag: ${{ steps.semantic.outputs.new_release_git_tag }}"
+          echo ""
+          
+          if [ "${{ steps.semantic.outputs.new_release_published }}" = "true" ]; then
+            echo "NEW RELEASE CREATED"
+            echo "Version: v${{ steps.semantic.outputs.new_release_version }}"
+            echo "Tag: ${{ steps.semantic.outputs.new_release_git_tag }}"
+            echo ""
+            echo "Release determined by analyzing:"
+            echo "  - Recent PR merge commits with conventional titles"
+            echo "  - Commit messages following conventional format"
+            echo "  - Breaking change indicators"
+            echo ""
+            echo "Release includes:"
+            echo "  - GitHub release with auto-generated changelog"
+            echo "  - Git tag: ${{ steps.semantic.outputs.new_release_git_tag }}"
+            echo "  - Docker image: v${{ steps.semantic.outputs.new_release_version }}"
+          else
+            echo "No new release needed"
+            echo "Recent commits don't trigger version bump:"
+            echo "  - Only maintenance commits (docs, style, chore)"
+            echo "  - No feat/fix commits since last release"
+            echo ""
+            echo "Will deploy using existing version tags"
+          fi
+
   build-and-push:
+    needs: semantic-release
     runs-on: ubuntu-latest
     environment: dev
     
@@ -98,6 +158,15 @@ jobs:
           
           echo "Using image: $IMAGE_URI"
           
+          # Show release information if available
+          if [ "${{ needs.semantic-release.outputs.new-release-version }}" != "" ]; then
+            echo "Deploying NEW RELEASE: v${{ needs.semantic-release.outputs.new-release-version }}"
+            echo "Release type: Semantic versioning based on PR analysis"
+          else
+            echo "Deploying development build"
+            echo "Commit: ${{ github.sha }}"
+            echo "No new semantic release (maintenance commits only)"
+          fi
           # Clean up any existing deployments first
           echo "=== Cleaning up existing deployments ==="
           kubectl delete deployment liatrio-demo-api --ignore-not-found=true
@@ -287,7 +356,7 @@ jobs:
           fi
 
   deployment-summary:
-    needs: [build-and-push, deploy, post-deploy-tests]
+    needs: [semantic-release, build-and-push, deploy, post-deploy-tests]
     runs-on: ubuntu-latest
     environment: dev
     if: always()
@@ -325,25 +394,38 @@ jobs:
         run: |
           echo "## 🚀 Deployment Summary"
           echo "========================"
+          echo "### Release Information"
+          echo "New release published: ${{ needs.semantic-release.outputs.new-release-published }}"
+          if [ "${{ needs.semantic-release.outputs.new-release-version }}" != "" ]; then
+            echo "Release version: v${{ needs.semantic-release.outputs.new-release-version }}"
+            echo "Git tag: ${{ needs.semantic-release.outputs.new-release-git-tag }}"
+            echo ""
+            echo "Release triggered by: PR-level semantic analysis"
+            echo "Based on: Conventional PR titles and commit messages"
+          else
+            echo "Development build (no new release)"
+            echo "Using existing version tags for deployment"
+          fi
           echo ""
-          echo "### 📊 Job Status"
-          echo "🏗️ Build & Push: ${{ needs.build-and-push.result }}"
-          echo "🚀 Deploy: ${{ needs.deploy.result }}"
-          echo "🧪 Post-Deploy Tests: ${{ needs.post-deploy-tests.result }}"
+          echo "### Job Status"
+          echo "Semantic Release: ${{ needs.semantic-release.result }}"
+          echo "Build & Push: ${{ needs.build-and-push.result }}"
+          echo "Deploy: ${{ needs.deploy.result }}"
+          echo "Post-Deploy Tests: ${{ needs.post-deploy-tests.result }}"
           echo ""
-          echo "### 📋 Deployment Details"
+          echo "### Deployment Details"
           echo "Commit: ${{ github.sha }}"
           echo "Branch: ${{ github.ref_name }}"
           echo "Triggered by: ${{ github.actor }}"
           echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           echo ""
-          echo "### 🌐 API Endpoints"
+          echo "### API Endpoints"
           echo "Base URL: $API_BASE_URL"
           echo "API Endpoint: $API_ENDPOINT"
           echo "Health Check: $HEALTH_ENDPOINT"
           echo "Metrics: $METRICS_ENDPOINT"
           echo ""
-          echo "### 📝 Quick Test Commands"
+          echo "### Quick Test Commands"
           echo "\`\`\`bash"
           echo "# Test the API"
           echo "curl $API_ENDPOINT"
@@ -357,14 +439,14 @@ jobs:
           echo ""
           
           if [[ "${{ needs.deploy.result }}" == "success" ]]; then
-            echo "### ✅ Deployment Status: SUCCESS"
-            echo "� Application is deployed and ready to use!"
+            echo "### Deployment Status: SUCCESS"
+            echo "Application is deployed and ready to use!"
             echo ""
             echo "The Liatrio demo API is now live and responding to requests."
             echo "You can test the endpoints above to verify functionality."
           else
-            echo "### ❌ Deployment Status: FAILED"
-            echo "💥 Deployment encountered issues - check job logs for details"
+            echo "### Deployment Status: FAILED"
+            echo "Deployment encountered issues - check job logs for details"
             echo ""
             echo "Please review the deploy job output for troubleshooting information."
           fi

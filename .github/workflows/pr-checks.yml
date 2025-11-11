@@ -5,6 +5,9 @@ on:
     branches: [main]
     # Remove path filters to run on every PR
 
+# Validates PRs before merging to main branch
+# Includes PR title validation for semantic release automation
+
 # Required for security scanning and terraform validation
 permissions:
   id-token: write  # Required for OIDC authentication to AWS
@@ -18,6 +21,90 @@ env:
   TFLINT_VERSION: 'v0.50.3'
 
 jobs:
+  pr-title-check:
+    name: Validate PR Title
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Validate PR title for semantic release
+        run: |
+          echo "=== Validating PR Title for Semantic Release ==="
+          echo ""
+          
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          echo "PR Title: $PR_TITLE"
+          echo ""
+          
+          # Check if PR title follows conventional commit format
+          if echo "$PR_TITLE" | grep -qE '^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(.+\))?!?:'; then
+            echo "Valid conventional PR title"
+            
+            # Extract type for information
+            TYPE=$(echo "$PR_TITLE" | sed -E 's/^([a-z]+)(\(.+\))?!?:.*/\1/')
+            BREAKING=$(echo "$PR_TITLE" | grep -q '!:' && echo "yes" || echo "no")
+            
+            echo ""
+            echo "=== Version Impact ==="
+            case "$TYPE" in
+              "feat")
+                if [ "$BREAKING" = "yes" ]; then
+                  echo "MAJOR version bump (breaking change)"
+                else
+                  echo "MINOR version bump (new feature)"
+                fi
+                ;;
+              "fix")
+                if [ "$BREAKING" = "yes" ]; then
+                  echo "MAJOR version bump (breaking change)"
+                else
+                  echo "PATCH version bump (bug fix)"
+                fi
+                ;;
+              "docs"|"style"|"refactor"|"test"|"chore"|"perf"|"ci"|"build"|"revert")
+                if [ "$BREAKING" = "yes" ]; then
+                  echo "MAJOR version bump (breaking change)"
+                else
+                  echo "No version bump (maintenance)"
+                fi
+                ;;
+            esac
+            
+          elif echo "$PR_TITLE" | grep -qiE '\b(breaking change|breaking)\b'; then
+            echo "Valid breaking change PR title"
+            echo ""
+            echo "=== Version Impact ==="
+            echo "MAJOR version bump (breaking change detected)"
+            
+          else
+            echo "INVALID: PR title does not follow conventional format"
+            echo ""
+            echo "Valid PR title formats:"
+            echo "  feat: add user authentication system"
+            echo "  fix: resolve API timeout issues"
+            echo "  docs: update deployment instructions"
+            echo "  style: fix code formatting issues"
+            echo "  refactor: restructure auth module"
+            echo "  test: add integration tests"
+            echo "  chore: update dependencies"
+            echo ""
+            echo "For breaking changes:"
+            echo "  feat!: breaking API changes"
+            echo "  fix!: breaking bug fix"
+            echo "  OR include 'breaking change' in title"
+            echo ""
+            echo "With optional scope:"
+            echo "  feat(api): add new endpoint"
+            echo "  fix(auth): resolve login issue"
+            echo ""
+            echo "See README.md 'PR Title Conventions' section for details."
+            echo ""
+            exit 1
+          fi
+          
+          echo ""
+          echo "PR title validation passed!"
+          echo "When merged, this will trigger automatic semantic release."
+
   test:
     name: Automated App Tests
     runs-on: ubuntu-latest
@@ -252,7 +339,7 @@ jobs:
 
   pr-summary:
     name: PR Check Summary
-    needs: [test, security-scan, build-test, terraform-plan, tflint]
+    needs: [pr-title-check, test, security-scan, build-test, terraform-plan, tflint]
     runs-on: ubuntu-latest
     if: always()
     
@@ -262,16 +349,28 @@ jobs:
           echo "## Pre-merge Check Results"
           echo "=========================="
           echo ""
-          echo "🧪 Tests: ${{ needs.test.result }}"
-          echo "🛡️ Security Scan: ${{ needs.security-scan.result }}"
-          echo "🏗️ Build Test: ${{ needs.build-test.result }}"
-          echo "🏗️ Terraform Plan: ${{ needs.terraform-plan.result }}"
-          echo "🔍 TFLint: ${{ needs.tflint.result }}"
+          echo "PR Title: ${{ needs.pr-title-check.result }}"
+          echo "Tests: ${{ needs.test.result }}"
+          echo "Security Scan: ${{ needs.security-scan.result }}"
+          echo "Build Test: ${{ needs.build-test.result }}"
+          echo "Terraform Plan: ${{ needs.terraform-plan.result }}"
+          echo "TFLint: ${{ needs.tflint.result }}"
           echo ""
           
-          if [[ "${{ needs.test.result }}" == "success" && "${{ needs.security-scan.result }}" == "success" && "${{ needs.build-test.result }}" == "success" && "${{ needs.terraform-plan.result }}" == "success" && "${{ needs.tflint.result }}" == "success" ]]; then
-            echo "✅ All checks passed - Ready for merge!"
+          if [[ "${{ needs.pr-title-check.result }}" == "success" && "${{ needs.test.result }}" == "success" && "${{ needs.security-scan.result }}" == "success" && "${{ needs.build-test.result }}" == "success" && "${{ needs.terraform-plan.result }}" == "success" && "${{ needs.tflint.result }}" == "success" ]]; then
+            echo "All checks passed - Ready for merge!"
+            echo ""
+            echo "Semantic release will automatically:"
+            echo "  - Determine next version based on PR title"
+            echo "  - Create GitHub release with changelog"  
+            echo "  - Tag Docker images with semantic version"
+            echo "  - Deploy to environment"
           else
-            echo "❌ Some checks failed - Review required"
+            echo "Some checks failed - Review required"
+            echo ""
+            if [[ "${{ needs.pr-title-check.result }}" != "success" ]]; then
+              echo "Fix PR title to follow conventional format"
+              echo "See README.md 'PR Title Conventions' section for examples"
+            fi
             exit 1
           fi

@@ -113,27 +113,14 @@ terraform apply
 - The first `terraform apply` creates the S3 bucket and DynamoDB table for state storage
 - The `terraform init -migrate-state` migrates your local state to the remote backend
 - Subsequent team members can skip steps 2-3 and run normal `init/plan/apply` for the same environment
-- 
+
 ### 4. Deploy Application
 
-#### Option A: Automated CI/CD (Recommended)
-
-1. **Fork this repository** to your GitHub account
-2. **Set up GitHub Environment** named `dev`
-3. **Configure AWS OIDC Role** in GitHub environment variables:
-
-   ```bash
-   AWS_ROLE_ARN = arn:aws:iam::YOUR_ACCOUNT:role/github-actions-role
-   ```
-
-4. **Push to main branch** - CI/CD pipeline will automatically deploy
-
-#### Option B: Manual Deployment
-
-```powershell
-# From project root directory
-.\scripts\deploy.ps1
-```
+**Option A: Automated CI/CD**
+1. Fork repository and set up `dev` environment in GitHub
+2. Add `AWS_ROLE_ARN` variable: `arn:aws:iam::ACCOUNT:role/github-actions-role`
+3. Create PRs with conventional titles (see PR Title Conventions below)
+4. Automatic semantic versioning, releases, and deployment
 
 ### 5. Verify Deployment
 
@@ -186,6 +173,65 @@ curl http://localhost:8080/health
 ```
 
 #### Local Testing
+
+## PR Title Conventions & Automated Releases
+
+This project uses **semantic versioning** with automated releases based on PR title conventions. Follow these PR title formats to trigger proper version bumps and releases when your PR is merged:
+
+### PR Title Format
+```
+<type>: <description>
+
+[optional scope in parentheses]
+```
+
+### PR Title Types
+- **`feat:`** New features → **Minor version bump** (v1.1.0)
+- **`fix:`** Bug fixes → **Patch version bump** (v1.0.1)  
+- **`docs:`** Documentation changes → No version bump
+- **`style:`** Code formatting → No version bump
+- **`refactor:`** Code restructuring → No version bump
+- **`test:`** Test additions/updates → No version bump
+- **`chore:`** Maintenance tasks → No version bump
+- **`BREAKING CHANGE:`** Breaking changes → **Major version bump** (v2.0.0)
+
+### Examples
+```bash
+# Patch release (v1.0.1)
+PR Title: "fix: resolve API timeout issue in health endpoint"
+
+# Minor release (v1.1.0) 
+PR Title: "feat: add new metrics endpoint for monitoring"
+
+# Major release (v2.0.0)
+PR Title: "feat!: update API to v2 format"
+# OR
+PR Title: "feat: update API with breaking changes"
+
+# No release
+PR Title: "docs: update README with deployment examples"
+
+# With scope
+PR Title: "feat(api): add user authentication system"
+PR Title: "fix(auth): resolve login timeout issue"
+```
+
+### Commit Message Freedom
+Within your PR, **commit messages can be flexible** - focus on clear development history:
+```bash
+# These commits are fine within a PR titled "feat: add user auth"
+git commit -m "add login endpoint"
+git commit -m "implement JWT validation"  
+git commit -m "fix typo in error message"
+git commit -m "add tests for auth flow"
+```
+
+### Automated Workflows
+### Automated Workflows
+- **Pull Requests:** PR title validation, build and test without deploying
+- **Main Branch:** Full CI/CD pipeline with automatic versioning based on PR title
+- **Release Creation:** Automatic GitHub releases with generated changelogs
+- **Container Tagging:** Docker images tagged with semantic versions (v1.2.3)
 
 The project includes a comprehensive automated test suite that validates all API endpoints and functionality.
 
@@ -442,12 +488,26 @@ terraform destroy
 
 ## 🤝 Contributing
 
-1. **Fork the repository**
-2. **Create feature branch**: `git checkout -b feature/amazing-feature`
-3. **Make changes** and test locally
-4. **Commit changes**: `git commit -m 'Add amazing feature'`
-5. **Push to branch**: `git push origin feature/amazing-feature`
-6. **Open Pull Request**
+1. Fork repository and create feature branch
+2. Make changes and test locally using `python run_tests.py`
+3. **Use conventional PR titles** (see PR Title Conventions section above)
+4. Submit pull request with descriptive conventional title
+
+**Example PR Workflow:**
+```bash
+git checkout -b feat/new-monitoring
+# Make changes with flexible commit messages
+git commit -m "add prometheus integration"
+git commit -m "update config for metrics"  
+git commit -m "add tests and documentation"
+git push origin feat/new-monitoring
+
+# Create PR with conventional title:
+# Title: "feat: add Prometheus metrics integration"
+# Description: Details about the feature...
+
+# PR validation checks → merge → automatic release
+```
 
 ## 📝 License
 
