@@ -63,7 +63,14 @@ def version():
         "semantic_release": "enabled",
         "build_info": {
             "timestamp": int(time.time()),
-            "environment": os.environ.get('ENVIRONMENT', 'development')
+            "environment": os.environ.get('ENVIRONMENT', 'development'),
+            "commit": os.environ.get('GITHUB_SHA', 'local'),
+            "branch": os.environ.get('GITHUB_REF_NAME', 'local')
+        },
+        "release_info": {
+            "automated": True,
+            "pr_based": True,
+            "conventional_commits": True
         },
         "message": "Semantic release testing endpoint"
     })
