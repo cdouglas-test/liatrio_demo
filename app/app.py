@@ -23,8 +23,7 @@ def root():
             "/": "Welcome endpoint",
             "/api": "Main API endpoint", 
             "/health": "Health check endpoint",
-            "/metrics": "Service metrics",
-            "/version": "Version and build information"
+            "/metrics": "Service metrics"
         },
         "timestamp": int(time.time())
     })
@@ -66,20 +65,6 @@ def metrics():
         "timestamp": int(time.time()),
         "host": HOST,
         "port": PORT
-    })
-
-@app.route('/version', methods=['GET'])
-def version():
-    """Version endpoint for semantic release testing"""
-    return jsonify({
-        "service": "liatrio-demo-api",
-        "version": "1.0.0",
-        "semantic_release": "enabled",
-        "build_info": {
-            "timestamp": int(time.time()),
-            "environment": os.environ.get('ENVIRONMENT', 'development')
-        },
-        "message": "Semantic release testing endpoint"
     })
 
 @app.errorhandler(404)

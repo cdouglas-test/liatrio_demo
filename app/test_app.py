@@ -91,21 +91,6 @@ class TestAPIEndpoints:
         assert 'port' in data
 
     @pytest.mark.unit
-    def test_version_endpoint(self, client):
-        """Test the new version endpoint for semantic release testing"""
-        response = client.get('/version')
-        assert response.status_code == 200
-        
-        data = json.loads(response.data)
-        assert data['service'] == "liatrio-demo-api"
-        assert data['version'] == "1.0.0"
-        assert data['semantic_release'] == "enabled"
-        assert 'build_info' in data
-        assert 'timestamp' in data['build_info']
-        assert 'environment' in data['build_info']
-        assert data['message'] == "Semantic release testing endpoint"
-
-    @pytest.mark.unit
     def test_test_endpoint(self, client):
         """Test the /test endpoint"""
         response = client.get('/test')
