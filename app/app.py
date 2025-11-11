@@ -27,6 +27,14 @@ def root():
         "timestamp": int(time.time())
     })
 
+@app.route('/test', methods=['GET'])
+def root():
+    """Root endpoint returning welcome message"""
+    return jsonify({
+        "message": "TEST!",
+        "timestamp": int(time.time())
+    })
+
 @app.route('/api', methods=['GET'])
 def api():
     """Main API endpoint as specified in the problem statement"""
