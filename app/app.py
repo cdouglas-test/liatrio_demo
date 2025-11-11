@@ -39,7 +39,7 @@ def api():
 def test():
     """Main API endpoint as specified in the problem statement"""
     return jsonify({
-        "message": "test",
+        "message": "tested",
         "timestamp": int(time.time())
     })
 
