@@ -8,10 +8,12 @@ on:
       - 'k8s/**'
       - '.github/workflows/deploy.yml'
 
-# Required for OIDC authentication to AWS
+# Required for OIDC authentication to AWS and semantic release
 permissions:
   id-token: write
-  contents: read
+  contents: write  # Required for semantic-release to create releases and push tags
+  issues: write  # Required for semantic-release to comment on issues
+  pull-requests: write  # Required for semantic-release to comment on PRs
 
 env:
   AWS_REGION: us-east-1
@@ -19,13 +21,47 @@ env:
   EKS_CLUSTER_NAME: liatrio-demo-dev-eks-xscgoqr8
 
 jobs:
+  semantic-release:
+    runs-on: ubuntu-latest
+    outputs:
+      new-release-published: ${{ steps.semantic.outputs.new_release_published }}
+      new-release-version: ${{ steps.semantic.outputs.new_release_version }}
+      new-release-git-tag: ${{ steps.semantic.outputs.new_release_git_tag }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Semantic Release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          semantic_version: 19
+          extra_plugins: |
+            @semantic-release/changelog@6.0.0
+            @semantic-release/git@10.0.0
+
+      - name: Release Summary
+        run: |
+          echo "=== Semantic Release Summary ==="
+          echo "New release published: ${{ steps.semantic.outputs.new_release_published }}"
+          echo "New release version: ${{ steps.semantic.outputs.new_release_version }}"
+          echo "New release git tag: ${{ steps.semantic.outputs.new_release_git_tag }}"
+
   build-and-push:
+    needs: semantic-release
     runs-on: ubuntu-latest
     environment: dev
     
     outputs:
       image-tag: ${{ steps.meta.outputs.tags }}
       image-digest: ${{ steps.build.outputs.digest }}
+      release-version: ${{ needs.semantic-release.outputs.new-release-version }}
     
     steps:
       - name: Checkout code
@@ -49,7 +85,19 @@ jobs:
           images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=dev-latest
+            type=raw,value=v${{ needs.semantic-release.outputs.new-release-version }},enable=${{ needs.semantic-release.outputs.new-release-published }}
             type=sha,format=short
+
+      - name: Show release and build information
+        run: |
+          echo "=== Release Information ==="
+          echo "New release published: ${{ needs.semantic-release.outputs.new-release-published }}"
+          echo "New release version: ${{ needs.semantic-release.outputs.new-release-version }}"
+          echo "New release git tag: ${{ needs.semantic-release.outputs.new-release-git-tag }}"
+          echo ""
+          echo "=== Docker Tags ==="
+          echo "${{ steps.meta.outputs.tags }}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -97,6 +145,13 @@ jobs:
           IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest"
           
           echo "Using image: $IMAGE_URI"
+          
+          # Show release information if available
+          if [ "${{ needs.build-and-push.outputs.release-version }}" != "" ]; then
+            echo "🏷️ Deploying release version: v${{ needs.build-and-push.outputs.release-version }}"
+          else
+            echo "📦 Deploying development build (commit: ${{ github.sha }})"
+          fi
           
           # Clean up any existing deployments first
           echo "=== Cleaning up existing deployments ==="
@@ -287,7 +342,7 @@ jobs:
           fi
 
   deployment-summary:
-    needs: [build-and-push, deploy, post-deploy-tests]
+    needs: [semantic-release, build-and-push, deploy, post-deploy-tests]
     runs-on: ubuntu-latest
     environment: dev
     if: always()
@@ -326,7 +381,17 @@ jobs:
           echo "## 🚀 Deployment Summary"
           echo "========================"
           echo ""
+          echo "### 🏷️ Release Information"
+          echo "New release published: ${{ needs.semantic-release.outputs.new-release-published }}"
+          if [ "${{ needs.semantic-release.outputs.new-release-version }}" != "" ]; then
+            echo "Release version: v${{ needs.semantic-release.outputs.new-release-version }}"
+            echo "Git tag: ${{ needs.semantic-release.outputs.new-release-git-tag }}"
+          else
+            echo "Development build (no new release)"
+          fi
+          echo ""
           echo "### 📊 Job Status"
+          echo "🏗️ Semantic Release: ${{ needs.semantic-release.result }}"
           echo "🏗️ Build & Push: ${{ needs.build-and-push.result }}"
           echo "🚀 Deploy: ${{ needs.deploy.result }}"
           echo "🧪 Post-Deploy Tests: ${{ needs.post-deploy-tests.result }}"

@@ -1,0 +1,28 @@
+{
+  "name": "liatrio-demo-api",
+  "version": "1.0.0",
+  "description": "Liatrio Demo Flask API with DevOps automation",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cdouglas-test/liatrio_demo.git"
+  },
+  "keywords": [
+    "flask",
+    "api",
+    "devops",
+    "kubernetes",
+    "aws",
+    "ci-cd"
+  ],
+  "author": "Liatrio Demo",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "semantic-release": "semantic-release"
+  },
+  "devDependencies": {
+    "@semantic-release/changelog": "^6.0.0",
+    "@semantic-release/git": "^10.0.0",
+    "semantic-release": "^19.0.0"
+  }
+}
