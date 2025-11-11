@@ -23,8 +23,7 @@ def root():
             "/": "Welcome endpoint",
             "/api": "Main API endpoint", 
             "/health": "Health check endpoint",
-            "/metrics": "Service metrics",
-            "/version": "Version and build information"
+            "/metrics": "Service metrics"
         },
         "timestamp": int(time.time())
     })
