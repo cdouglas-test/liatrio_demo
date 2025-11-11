@@ -19,6 +19,7 @@ env:
 
 jobs:
   test:
+    name: Automated App Tests
     runs-on: ubuntu-latest
     
     steps:
@@ -80,6 +81,7 @@ jobs:
           docker rm test-container
 
   security-scan:
+    name: Security Scan
     runs-on: ubuntu-latest
     needs: test
     
@@ -104,6 +106,32 @@ jobs:
           format: 'sarif'
           output: 'trivy-results.sarif'
 
+      - name: Print SARIF file info and access link
+        if: always()
+        run: |
+          echo "========================================"
+          echo "TRIVY VULNERABILITY SCAN RESULTS"
+          echo "========================================"
+          echo ""
+          echo "SARIF file generated: trivy-results.sarif"
+          echo "File size: $(ls -lh trivy-results.sarif | awk '{print $5}')"
+          echo ""
+          echo "Access scan results:"
+          echo "   • GitHub Security tab: https://github.com/${{ github.repository }}/security"
+          echo "   • Direct SARIF file: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo ""
+          echo "Quick SARIF summary:"
+          if [ -f trivy-results.sarif ]; then
+            # Extract basic info from SARIF file
+            RULES_COUNT=$(jq '.runs[0].tool.driver.rules | length' trivy-results.sarif 2>/dev/null || echo "0")
+            RESULTS_COUNT=$(jq '.runs[0].results | length' trivy-results.sarif 2>/dev/null || echo "0")
+            echo "   • Security rules checked: $RULES_COUNT"
+            echo "   • Vulnerabilities found: $RESULTS_COUNT"
+          else
+            echo "   • SARIF file not found"
+          fi
+          echo "========================================"
+
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
         if: always()
@@ -111,6 +139,7 @@ jobs:
           sarif_file: 'trivy-results.sarif'
 
   build-test:
+    name: Build and Test Docker Image
     needs: [test, security-scan]
     runs-on: ubuntu-latest
     
@@ -222,6 +251,7 @@ jobs:
         run: tflint -f compact
 
   pr-summary:
+    name: PR Check Summary
     needs: [test, security-scan, build-test, terraform-plan, tflint]
     runs-on: ubuntu-latest
     if: always()
