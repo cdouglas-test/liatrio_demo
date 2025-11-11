@@ -1,114 +1,42 @@
 # Liatrio Demo - Cloud-Native Flask API
 
-Enterprise cloud-native Flask API demonstrating modern DevOps practices with Kubernetes deployment on AWS EKS, automated CI/CD pipelines, and Infrastructure as Code.
+Enterprise Flask API with automated AWS EKS deployment, demonstrating modern DevOps practices including Infrastructure as Code, CI/CD pipelines, and security scanning.
 
-## 🚀 Overview
+## Features
 
-This project showcases a complete cloud-native deployment pipeline featuring:
+- **Flask REST API** with `/api`, `/health`, `/metrics` endpoints
+- **AWS EKS Deployment** with Terraform Infrastructure as Code
+- **Automated CI/CD** with GitHub Actions, security scanning, and OIDC auth
+- **Comprehensive Testing** - unit, integration, contract, and security validation
+- **One-Command Deployment** scripts for complete environment setup
 
-- **Flask REST API** with production-ready endpoints
-- **AWS EKS** Kubernetes cluster provisioned with Terraform
-- **GitHub Actions** CI/CD pipeline with OIDC authentication
-- **Docker** containerization with ECR registry
-- **Infrastructure as Code** using Terraform modules
-- **Automated testing** and deployment validation
+## Prerequisites
 
-### API Endpoints
+**Required Tools:** AWS CLI v2.x, Terraform v1.0+, kubectl, Docker, PowerShell 5.1+
 
-- `GET /api` - Returns `{"message": "Automate all the things!", "timestamp": <unix_timestamp>}`
-- `GET /health` - Health check endpoint for Kubernetes probes
-- `GET /metrics` - Basic metrics and service information
-- `GET /` - Welcome endpoint with API documentation
+**AWS Setup:** Account with EKS/EC2/VPC/IAM/ECR/S3/DynamoDB permissions, configured AWS CLI
 
-## 📋 Prerequisites
+**Estimated Cost:** ~$100/month for development usage
 
-### Required Tools
+## Quick Start
 
-- **AWS CLI** v2.x ([Installation Guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html))
-- **Terraform** v1.0+ ([Installation Guide](https://developer.hashicorp.com/terraform/install))
-- **kubectl** ([Installation Guide](https://kubernetes.io/docs/tasks/tools/))
-- **Docker** ([Installation Guide](https://docs.docker.com/get-docker/))
-- **PowerShell** 5.1+ or PowerShell Core 7+ (for manual deployment scripts)
-
-### AWS Requirements
-
-- AWS Account with appropriate permissions
-- AWS CLI configured with credentials (`aws configure`)
-- Permissions for: EKS, EC2, VPC, IAM, ECR, S3, DynamoDB
-
-### Estimated Costs
-
-- **EKS Cluster**: ~$0.10/hour ($73/month)
-- **EC2 Nodes**: ~$0.05/hour per t3.medium instance
-- **Total**: Under $100 for development/demo usage
-
-## 🏗️ Architecture
-
-```text
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   GitHub Repo   │───▶│ GitHub Actions  │───▶│   AWS ECR       │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                                │                       │
-                                ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Terraform     │───▶│   AWS EKS       │◀───│ Load Balancer   │
-│   (IaC)         │    │   Cluster       │    │   Service       │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
-
-### Infrastructure Components
-
-- **VPC** with public/private subnets across 2 AZs
-- **EKS Cluster** with managed node groups
-- **ECR Repository** for container images
-- **S3 + DynamoDB** for Terraform state management
-- **IAM Roles** with least-privilege access
-- **Security Groups** for network access control
-
-## 🚀 Quick Start Guide
-
-### 1. Clone and Setup
-
+### 1. Setup
 ```bash
 git clone https://github.com/CRdouglas/liatrio_demo.git
 cd liatrio_demo
+aws configure  # Configure credentials
 ```
 
-### 2. Configure AWS Credentials
-
-```bash
-aws configure
-# Enter your AWS Access Key ID, Secret, Region (us-east-1), and output format (json)
-
-# Verify configuration
-aws sts get-caller-identity
-```
-
-### 3. Deploy Infrastructure
-
-The infrastructure uses a remote Terraform state backend (S3 + DynamoDB) for state management. Follow these steps:
-
+### 2. Deploy Infrastructure
 ```bash
 cd infrastructure
-
-# Step 1: Initialize Terraform (local state initially)
 terraform init
-
-# Step 2: Deploy the state backend infrastructure first
 terraform apply -target=module.tfstate_backend -target=random_string.tfstate_suffix
-
-# Step 3: Configure remote backend (after S3 bucket is created)
-# The backend configuration will be automatically set up
 terraform init -migrate-state
-
-# Step 4: Review full infrastructure plan
-terraform plan
-
-# Step 5: Deploy remaining infrastructure (takes ~15-20 minutes)
-terraform apply
+terraform apply  # Takes ~15-20 minutes
 ```
 
-**Important Notes:**
+### 3. Deploy Application
 
 - The first `terraform apply` creates the S3 bucket and DynamoDB table for state storage
 - The `terraform init -migrate-state` migrates your local state to the remote backend
@@ -124,52 +52,23 @@ terraform apply
 
 ### 5. Verify Deployment
 
+**Option B: Manual Deployment**
 ```bash
-# Check cluster status
-kubectl get nodes
-
-# Check application pods
-kubectl get pods -l app=liatrio-demo-api-simple
-
-# Get load balancer URL
-kubectl get service liatrio-demo-api-simple-service
-
-# Test API endpoint
-curl http://<LOAD_BALANCER_URL>/api
+.\scripts\deploy.ps1    # Windows
+./scripts/deploy.sh     # Linux/macOS
 ```
 
-## 👨‍💻 Developer Guide
+## Development
 
 ### Local Development
-
-#### Running Locally
-
 ```bash
 cd app
-
-# Install dependencies
 pip install -r requirements.txt
+python app.py  # Runs on http://localhost:8080
 
-# Run Flask development server
-python app.py
-```
-
-The API will be available at `http://localhost:8080`
-
-#### Testing Locally with Docker
-
-```bash
-cd app
-
-# Build Docker image
+# Test with Docker
 docker build -t liatrio-demo-api .
-
-# Run container
 docker run -p 8080:8080 liatrio-demo-api
-
-# Test endpoints
-curl http://localhost:8080/api
-curl http://localhost:8080/health
 ```
 
 #### Local Testing
@@ -239,254 +138,105 @@ The project includes a comprehensive automated test suite that validates all API
 
 ```bash
 cd app
-
-# Install test dependencies
-pip install -r requirements.txt
-
-# Run all tests
-python -m pytest test_app.py -v
-
-# Run tests with coverage report
-python -m pytest test_app.py -v --cov=app --cov-report=term-missing
+python run_tests.py  # Comprehensive test suite
+python -m pytest test_app.py -v -m unit      # Unit tests only
+python -m pytest test_app.py -v -m contract  # API compliance
 ```
 
-**Windows PowerShell:**
+**Test Coverage:** 24+ test cases, 90%+ code coverage, includes unit/integration/contract/security testing
 
-```powershell
-Set-Location app
+## Commit Conventions & Automated Releases
 
-# Install dependencies
-python -m pip install -r requirements.txt
+This project uses **semantic versioning** with automated releases based on commit message conventions. Follow these commit formats to trigger proper version bumps and releases:
 
-# Run tests
-python -m pytest test_app.py -v --cov=app --cov-report=term-missing
+### Commit Message Format
+```
+<type>: <description>
 
-# Or use the test runner script
-python run_tests.py
+[optional body]
+
+[optional footer]
 ```
 
-**Test Categories:**
+### Commit Types
+- **`feat:`** New features → **Minor version bump** (v1.1.0)
+- **`fix:`** Bug fixes → **Patch version bump** (v1.0.1)  
+- **`docs:`** Documentation changes → No version bump
+- **`style:`** Code formatting → No version bump
+- **`refactor:`** Code restructuring → No version bump
+- **`test:`** Test additions/updates → No version bump
+- **`chore:`** Maintenance tasks → No version bump
+- **`BREAKING CHANGE:`** Breaking changes → **Major version bump** (v2.0.0)
 
-- **Unit Tests** (`@pytest.mark.unit`) - Individual function testing
-- **Integration Tests** (`@pytest.mark.integration`) - Component interaction testing  
-- **Contract Tests** (`@pytest.mark.contract`) - API compliance with problem statement
-
-**Run Specific Test Categories:**
-
+### Examples
 ```bash
-# Run only unit tests
-python -m pytest test_app.py -v -m unit
+# Patch release (v1.0.1)
+git commit -m "fix: resolve API timeout issue in health endpoint"
 
-# Run only contract compliance tests
-python -m pytest test_app.py -v -m contract
+# Minor release (v1.1.0) 
+git commit -m "feat: add new metrics endpoint for monitoring"
 
-# Run only integration tests
-python -m pytest test_app.py -v -m integration
+# Major release (v2.0.0)
+git commit -m "feat: update API to v2 format
+
+BREAKING CHANGE: API response format changed from {data} to {result, metadata}"
+
+# No release
+git commit -m "docs: update README with deployment examples"
 ```
 
-**Current Test Coverage Summary:**
+### Automated Workflows
+- **Pull Requests:** Build and test without deploying
+- **Main Branch:** Full CI/CD pipeline with automated versioning and deployment
+- **Release Creation:** Automatic GitHub releases with generated changelogs
+- **Container Tagging:** Docker images tagged with semantic versions (v1.2.3)
 
-- ✅ **16 tests** covering all endpoints and functionality
-- ✅ **88% code coverage** of the Flask application
-- ✅ **Problem statement compliance** validation
-- ✅ **Kubernetes readiness** endpoint testing
-- ✅ **Error handling** and edge case validation
-
-### Making Changes
-
-#### Application Changes
-
-1. **Modify code** in `app/` directory
-2. **Test locally** using Flask development server
-3. **Build and test** Docker image locally
-4. **Commit changes** to trigger CI/CD pipeline
-5. **Monitor deployment** in GitHub Actions
-
-#### Infrastructure Changes
-
-1. **Modify Terraform** configuration in `infrastructure/`
-2. **Validate changes**: `terraform plan`
-3. **Apply changes**: `terraform apply`
-4. **Update Kubernetes manifests** if needed in `k8s/`
-
-#### Kubernetes Configuration
-
-1. **Modify manifests** in `k8s/` directory
-2. **Test locally**: `kubectl apply -f k8s/simple-deployment.yaml`
-3. **Commit changes** to trigger deployment
-
-### Project Structure
+## Project Structure
 
 ```text
 liatrio_demo/
-├── app/                          # Flask application
-│   ├── app.py                   # Main application file
-│   ├── requirements.txt         # Python dependencies
-│   └── Dockerfile              # Container configuration
-├── infrastructure/              # Terraform IaC
-│   ├── main.tf                 # Main infrastructure configuration
-│   ├── variables.tf            # Variable definitions
-│   ├── outputs.tf              # Output values
-│   └── terraform.tfvars        # Environment variables
-├── k8s/                        # Kubernetes manifests
-│   ├── simple-deployment.yaml  # Main deployment (used by CI/CD)
-│   └── deployment.yaml         # Alternative deployment with Ingress
-├── .github/workflows/          # CI/CD pipeline
-│   └── build-deploy.yml        # GitHub Actions workflow
-├── scripts/                    # Deployment utilities
-│   └── deploy.ps1              # Manual deployment script
-└── README.md                   # This file
+├── app/                    # Flask application & tests
+├── infrastructure/         # Terraform IaC
+├── k8s/                   # Kubernetes manifests  
+├── .github/workflows/     # CI/CD pipelines
+├── scripts/               # Deployment automation
+└── README.md
 ```
 
-### Debugging Common Issues
+## Troubleshooting
 
-#### Terraform State Backend Issues
+**Common Issues:**
+- **Pod OOMKilled:** Current allocation: 128Mi request, 256Mi limit
+- **Terraform State:** Use `terraform init -migrate-state` for backend issues
+- **Pod Won't Start:** Check `kubectl describe pod <name>` and `kubectl logs <name>`
+- **Load Balancer:** Allow 5-10 minutes for AWS ELB provisioning
+
+## Configuration
+
+**Multi-Environment Setup:**
+```bash
+terraform workspace new staging
+terraform apply -var-file="staging.tfvars"
+```
+
+**Scaling:**
+Modify `node_group_min/max/desired_size` in `terraform.tfvars`
+
+## Cleanup
 
 ```bash
-# If state migration fails or backend issues occur:
-
-# Check if S3 bucket exists
-aws s3 ls | grep tfstate
-
-# Check DynamoDB table
-aws dynamodb list-tables | grep tfstate
-
-# Reset to local state (emergency only)
-rm -rf .terraform
-terraform init -backend=false
-
-# Re-run backend setup
-terraform apply -target=module.tfstate_backend -target=random_string.tfstate_suffix
-terraform init -migrate-state
-```
-
-#### Pod Won't Start
-
-```bash
-# Check pod status
-kubectl get pods -l app=liatrio-demo-api-simple
-
-# Get detailed pod information
-kubectl describe pod <pod-name>
-
-# Check application logs
-kubectl logs <pod-name>
-```
-
-#### Memory Issues (OOMKilled)
-
-The application was initially configured with 32Mi memory limits, which caused OOMKilled errors with Gunicorn's 2-worker configuration. Current allocation:
-
-```yaml
-resources:
-  requests:
-    memory: "128Mi"
-  limits:
-    memory: "256Mi"
-```
-
-#### Load Balancer Issues
-
-```bash
-# Check service status
-kubectl get service liatrio-demo-api-simple-service
-
-# Check load balancer provisioning
-kubectl describe service liatrio-demo-api-simple-service
-```
-
-#### CI/CD Pipeline Failures
-
-1. **Check GitHub Actions** logs in repository Actions tab
-2. **Verify AWS permissions** for GitHub Actions role
-3. **Check ECR repository** exists and is accessible
-4. **Validate Kubernetes manifests** locally
-
-### Testing Strategy
-
-#### Automated Tests
-
-- **Container build** validation in CI/CD
-- **Deployment health checks** with readiness probes
-- **API endpoint validation** after deployment
-- **Infrastructure validation** with Terraform plan
-
-#### Manual Testing
-
-```bash
-# API functionality
-curl http://<LOAD_BALANCER_URL>/api
-curl http://<LOAD_BALANCER_URL>/health
-
-# Kubernetes resources
-kubectl get all -l app=liatrio-demo-api-simple
-
-# Infrastructure status
-terraform plan  # Should show no changes
-```
-
-## 🔧 Advanced Configuration
-
-### Multi-Environment Setup
-
-To deploy to additional environments:
-
-1. **Create new terraform.tfvars** file:
-
-   ```hcl
-   aws_region   = "us-east-1"
-   project_name = "liatrio-demo"
-   environment  = "staging"  # or "prod"
-   ```
-
-2. **Deploy with workspace**:
-
-   ```bash
-   terraform workspace new staging
-   terraform apply -var-file="staging.tfvars"
-   ```
-
-### Scaling Configuration
-
-Modify `infrastructure/terraform.tfvars`:
-
-```hcl
-node_group_min_size     = 2
-node_group_max_size     = 10
-node_group_desired_size = 3
-node_instance_types     = ["t3.medium", "t3.large"]
-```
-
-### Security Enhancements
-
-- **Pod Security Standards**: Implement PSS policies
-- **Network Policies**: Restrict pod-to-pod communication
-- **RBAC**: Configure role-based access control
-- **Secrets Management**: Use AWS Secrets Manager or External Secrets Operator
-
-## 🧹 Cleanup
-
-### Destroy Resources
-
-```bash
-# Delete Kubernetes resources
 kubectl delete -f k8s/simple-deployment.yaml
-
-# Destroy infrastructure
-cd infrastructure
-terraform destroy
-
-# Confirm all resources are deleted in AWS Console
+cd infrastructure && terraform destroy
 ```
 
-### Cost Monitoring
+**Cost Monitoring:** Monitor AWS billing, use Cost Explorer, set billing alerts
 
-- **Monitor AWS billing** regularly
-- **Stop/start EKS cluster** when not in use (manually)
-- **Use AWS Cost Explorer** to track expenses
-- **Set up billing alerts** for cost thresholds
+## Contributing
 
-## 🤝 Contributing
+1. Fork repository and create feature branch
+2. Make changes and test locally using `python run_tests.py`
+3. **Follow commit conventions** (see Commit Conventions section above)
+4. Submit pull request with descriptive title and conventional commit messages
 
 1. Fork repository and create feature branch
 2. Make changes and test locally using `python run_tests.py`
@@ -509,17 +259,11 @@ git push origin feat/new-monitoring
 # PR validation checks → merge → automatic release
 ```
 
-## 📝 License
+## License & Support
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - See [LICENSE](LICENSE) file
 
-## 🆘 Support
-
-- **GitHub Issues**: Report bugs and request features
-- **Documentation**: Check this README and inline code comments
-- **AWS Documentation**: [EKS User Guide](https://docs.aws.amazon.com/eks/latest/userguide/)
-- **Terraform Documentation**: [AWS Provider](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
+**Support:** GitHub Issues, [AWS EKS Docs](https://docs.aws.amazon.com/eks/latest/userguide/), [Terraform Docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
 
 ---
-
-Built with ❤️ for demonstrating cloud-native best practices
+*Enterprise cloud-native Flask API demonstration project*
