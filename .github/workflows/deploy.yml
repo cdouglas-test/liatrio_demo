@@ -429,12 +429,10 @@ jobs:
             echo "API_BASE_URL=http://$LB_URL" >> $GITHUB_ENV
             echo "API_ENDPOINT=http://$LB_URL/api" >> $GITHUB_ENV
             echo "HEALTH_ENDPOINT=http://$LB_URL/health" >> $GITHUB_ENV
-            echo "METRICS_ENDPOINT=http://$LB_URL/metrics" >> $GITHUB_ENV
           else
             echo "API_BASE_URL=Load balancer still provisioning..." >> $GITHUB_ENV
             echo "API_ENDPOINT=Load balancer still provisioning..." >> $GITHUB_ENV
             echo "HEALTH_ENDPOINT=Load balancer still provisioning..." >> $GITHUB_ENV
-            echo "METRICS_ENDPOINT=Load balancer still provisioning..." >> $GITHUB_ENV
           fi
 
       - name: Deployment Summary
