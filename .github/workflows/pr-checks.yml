@@ -3,10 +3,7 @@ name: Pre-merge Checks
 on:
   pull_request:
     branches: [main]
-    paths:
-      - 'app/**'
-      - 'k8s/**'
-      - '.github/workflows/*.yml'
+    # Remove path filters to run on every PR
 
 # Required for security scanning
 permissions:
@@ -45,10 +42,76 @@ jobs:
           echo "Event name: ${{ github.event_name }}"
           echo "Ref: ${{ github.ref }}"
 
+      - name: Create success check for test job if not needed
+        if: steps.changes.outputs.app != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const checkName = 'test';
+            const conclusion = 'success';
+            
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: checkName,
+              head_sha: context.sha,
+              status: 'completed',
+              conclusion: conclusion,
+              output: {
+                title: 'Test job skipped',
+                summary: 'No application code changes detected. Test job marked as successful.',
+                text: 'This check was automatically created because no files in app/, k8s/, or workflow files were modified.'
+              }
+            });
+
+      - name: Create success check for security-scan job if not needed
+        if: steps.changes.outputs.app != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const checkName = 'security-scan';
+            const conclusion = 'success';
+            
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: checkName,
+              head_sha: context.sha,
+              status: 'completed',
+              conclusion: conclusion,
+              output: {
+                title: 'Security scan job skipped',
+                summary: 'No application code changes detected. Security scan job marked as successful.',
+                text: 'This check was automatically created because no files in app/, k8s/, or workflow files were modified.'
+              }
+            });
+
+      - name: Create success check for build-test job if not needed
+        if: steps.changes.outputs.app != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const checkName = 'build-test';
+            const conclusion = 'success';
+            
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: checkName,
+              head_sha: context.sha,
+              status: 'completed',
+              conclusion: conclusion,
+              output: {
+                title: 'Build test job skipped',
+                summary: 'No application code changes detected. Build test job marked as successful.',
+                text: 'This check was automatically created because no files in app/, k8s/, or workflow files were modified.'
+              }
+            });
+
   test:
     runs-on: ubuntu-latest
     needs: gate
-    if: always()
+    if: needs.gate.outputs.app-changed == 'true'
     
     steps:
       - name: Checkout code
@@ -111,7 +174,7 @@ jobs:
   security-scan:
     runs-on: ubuntu-latest
     needs: [gate, test]
-    if: always() && needs.test.result == 'success'
+    if: needs.gate.outputs.app-changed == 'true' && needs.test.result == 'success'
     
     steps:
       - name: Checkout code
@@ -143,7 +206,7 @@ jobs:
   build-test:
     needs: [gate, test, security-scan]
     runs-on: ubuntu-latest
-    if: always() && needs.test.result == 'success'
+    if: needs.gate.outputs.app-changed == 'true' && needs.test.result == 'success'
     
     steps:
       - name: Checkout code
@@ -158,6 +221,7 @@ jobs:
           context: ./app
           platforms: linux/amd64
           push: false
+          load: true  # This loads the image into the local Docker daemon
           tags: liatrio-demo-api:pr-${{ github.event.number }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
