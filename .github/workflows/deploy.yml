@@ -11,7 +11,7 @@ on:
 # Required for OIDC authentication to AWS and semantic release
 permissions:
   id-token: write
-  contents: write  # Required for semantic-release to create releases and push tags
+  contents: write  # Required for semantic-release to create releases and tags
   issues: write  # Required for semantic-release to comment on issues
   pull-requests: write  # Required for semantic-release to comment on PRs
 
@@ -42,9 +42,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           semantic_version: 19
-          extra_plugins: |
-            @semantic-release/changelog@6.0.0
-            @semantic-release/git@10.0.0
 
       - name: Release Summary
         run: |
