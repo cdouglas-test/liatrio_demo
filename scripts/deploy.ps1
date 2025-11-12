@@ -59,7 +59,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Write-Host "🔐 Logging into ECR..." -ForegroundColor Yellow
+Write-Host "Logging into ECR..." -ForegroundColor Yellow
 $LoginCommand = aws ecr get-login-password --region $AwsRegion
 $LoginCommand | docker login --username AWS --password-stdin $EcrUri
 
@@ -68,10 +68,10 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Write-Host "🏷️  Tagging image..." -ForegroundColor Yellow
+Write-Host "Tagging image..." -ForegroundColor Yellow
 docker tag "$EcrRepository`:$ImageTag" "$EcrUri`:$ImageTag"
 
-Write-Host "⬆️  Pushing image to ECR..." -ForegroundColor Yellow
+Write-Host "Pushing image to ECR..." -ForegroundColor Yellow
 docker push "$EcrUri`:$ImageTag"
 
 if ($LASTEXITCODE -ne 0) {
@@ -79,7 +79,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Write-Host "☸️  Updating kubeconfig..." -ForegroundColor Yellow
+Write-Host "Updating kubeconfig..." -ForegroundColor Yellow
 aws eks update-kubeconfig --region $AwsRegion --name $EksClusterName
 
 if ($LASTEXITCODE -ne 0) {
@@ -87,7 +87,7 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-Write-Host "📝 Updating Kubernetes manifests..." -ForegroundColor Yellow
+Write-Host "Updating Kubernetes manifests..." -ForegroundColor Yellow
 Set-Location ../k8s
 Copy-Item deployment.yaml deployment-temp.yaml
 (Get-Content deployment-temp.yaml) -replace "IMAGE_URI_PLACEHOLDER", "$EcrUri`:$ImageTag" | Set-Content deployment-temp.yaml
@@ -104,21 +104,21 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "Waiting for deployment to complete..." -ForegroundColor Yellow
 kubectl rollout status deployment/liatrio-demo-api -n default --timeout=300s
 
-Write-Host "🧹 Cleaning up temporary files..." -ForegroundColor Yellow
+Write-Host "Cleaning up temporary files..." -ForegroundColor Yellow
 Remove-Item deployment-temp.yaml -Force
 
 Write-Host "Deployment completed successfully!" -ForegroundColor Green
 Write-Host ""
 
-Write-Host "📊 Deployment Status:" -ForegroundColor Cyan
+Write-Host "Deployment Status:" -ForegroundColor Cyan
 kubectl get deployment liatrio-demo-api -n default
 Write-Host ""
 
-Write-Host "🎯 Service Information:" -ForegroundColor Cyan
+Write-Host "Service Information:" -ForegroundColor Cyan
 kubectl get service liatrio-demo-api-service -n default
 Write-Host ""
 
-Write-Host "📋 Pod Status:" -ForegroundColor Cyan
+Write-Host "Pod Status:" -ForegroundColor Cyan
 kubectl get pods -l app=liatrio-demo-api -n default
 
 # Get load balancer URL if available
