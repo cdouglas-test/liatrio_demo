@@ -60,6 +60,7 @@ module "tfstate_backend" {
     Environment = var.environment
     Purpose     = "Terraform State Backend"
     ManagedBy   = "Terraform"
+    Demo        = "liatrio-demo"
   }
 }
 
@@ -93,6 +94,7 @@ resource "aws_ecr_repository" "app_repo" {
     Environment = var.environment
     Purpose     = "Container Registry"
     ManagedBy   = "Terraform"
+    Demo        = "liatrio-demo"
   }
 }
 
@@ -142,6 +144,7 @@ module "vpc" {
     Project                                                                                                   = var.project_name
     Environment                                                                                               = var.environment
     ManagedBy                                                                                                 = "Terraform"
+    Demo                                                                                                      = "liatrio-demo"
     "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks-${random_string.tfstate_suffix.result}" = "shared"
   }
 
@@ -203,6 +206,7 @@ module "eks" {
         Project     = var.project_name
         Environment = var.environment
         ManagedBy   = "Terraform"
+        Demo        = "liatrio-demo"
       }
 
       # Increase timeouts for node group operations
@@ -250,6 +254,7 @@ module "eks" {
     Project     = var.project_name
     Environment = var.environment
     ManagedBy   = "Terraform"
+    Demo        = "liatrio-demo"
   }
 
   # Cluster-level timeouts

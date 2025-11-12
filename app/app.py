@@ -69,8 +69,7 @@ def version():
         },
         "release_info": {
             "automated": True,
-            "pr_based": True,
-            "conventional_commits": True
+            "pr_based": True
         },
         "message": "Semantic release testing endpoint"
     })
