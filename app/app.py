@@ -43,6 +43,12 @@ def test():
         "timestamp": int(time.time())
     })
 
+@app.route('/liatrio-demo', methods=['GET'])
+def liatrio_demo():
+    return jsonify({
+        "message": "Liatrio Rocks!",
+        "timestamp": int(time.time())
+    })
 
 @app.route('/health', methods=['GET'])
 def health():
