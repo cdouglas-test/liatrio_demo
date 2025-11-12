@@ -6,9 +6,12 @@ metadata:
   labels:
     app: liatrio-demo-api-simple
 spec:
-  replicas: 1
+  replicas: 2
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
   selector:
     matchLabels:
       app: liatrio-demo-api-simple
@@ -36,7 +39,23 @@ spec:
           limits:
             memory: "256Mi"
             cpu: "200m"
-        # No health checks initially - let's just get it running first
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
 ---
 apiVersion: v1
 kind: Service
