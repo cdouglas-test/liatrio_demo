@@ -144,7 +144,7 @@ module "vpc" {
     Project                                                                                                   = var.project_name
     Environment                                                                                               = var.environment
     ManagedBy                                                                                                 = "Terraform"
-    Demo                                                                                                      = "liatrio-demo"
+    Demo                                                                                                      = "liatrio-demo1"
     "kubernetes.io/cluster/${var.project_name}-${var.environment}-eks-${random_string.tfstate_suffix.result}" = "shared"
   }
 
