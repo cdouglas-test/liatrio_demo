@@ -16,6 +16,16 @@ on:
         - dev
         - staging
         - prod
+      force_cleanup:
+        description: 'Force cleanup even if some steps fail'
+        required: false
+        default: false
+        type: boolean
+      delete_state_backend:
+        description: 'Also delete Terraform state backend (S3 + DynamoDB)'
+        required: false
+        default: false
+        type: boolean
 
 # Required for OIDC authentication to AWS
 permissions:
@@ -50,6 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
     if: needs.validate-input.outputs.should-destroy == 'true'
+    continue-on-error: ${{ github.event.inputs.force_cleanup == 'true' }}
     
     steps:
       - name: Checkout code
@@ -64,22 +75,41 @@ jobs:
 
       - name: Update kubeconfig
         run: |
-          # Try to update kubeconfig, but don't fail if cluster doesn't exist
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name liatrio-demo-${{ github.event.inputs.environment }}-eks-* || echo "EKS cluster not found or already deleted"
+          # Get EKS cluster name from Terraform outputs first
+          cd infrastructure
+          terraform init
+          
+          # Try to get cluster name from Terraform output
+          CLUSTER_NAME=$(terraform output -raw eks_cluster_name 2>/dev/null || echo "")
+          
+          if [ -n "$CLUSTER_NAME" ]; then
+            echo "Found EKS cluster: $CLUSTER_NAME"
+            aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name $CLUSTER_NAME
+          else
+            echo "No EKS cluster found in Terraform state"
+          fi
 
       - name: Delete Kubernetes resources
         run: |
           echo "🧹 Cleaning up Kubernetes deployments..."
           
-          # Delete all application resources
+          # Delete specific application resources
+          echo "Deleting liatrio-demo application resources..."
+          kubectl delete deployment liatrio-demo-api-simple --ignore-not-found=true --timeout=60s
+          kubectl delete deployment liatrio-demo-api --ignore-not-found=true --timeout=60s
+          kubectl delete service liatrio-demo-api-simple-service --ignore-not-found=true --timeout=60s
+          kubectl delete service liatrio-demo-api-service --ignore-not-found=true --timeout=60s
+          kubectl delete pod liatrio-demo-api-pod --ignore-not-found=true --timeout=60s
+          
+          # Wait for load balancer cleanup
+          echo "Waiting for load balancers to be cleaned up..."
+          sleep 60
+          
+          # Delete any remaining resources
           kubectl delete deployment --all --timeout=60s || echo "No deployments found"
           kubectl delete service --all --timeout=60s || echo "No services found"
           kubectl delete ingress --all --timeout=60s || echo "No ingresses found"
           kubectl delete pod --all --timeout=60s || echo "No pods found"
-          
-          # Wait for cleanup
-          echo "Waiting for resources to be deleted..."
-          sleep 30
           
           # Show remaining resources
           echo "Remaining resources:"
@@ -89,7 +119,8 @@ jobs:
     needs: [validate-input, teardown-application]
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
-    if: needs.validate-input.outputs.should-destroy == 'true'
+    if: needs.validate-input.outputs.should-destroy == 'true' && (success() || github.event.inputs.force_cleanup == 'true')
+    continue-on-error: ${{ github.event.inputs.force_cleanup == 'true' }}
     
     steps:
       - name: Checkout code
@@ -98,7 +129,8 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: ~1.0
+          terraform_version: '1.9.0'
+          terraform_wrapper: false
 
       - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -143,21 +175,25 @@ jobs:
           
           # Check for remaining EKS clusters
           echo "Checking for EKS clusters..."
-          aws eks list-clusters --region ${{ env.AWS_REGION }} || echo "No EKS clusters found"
+          aws eks list-clusters --region ${{ env.AWS_REGION }} | jq '.clusters[]' || echo "No EKS clusters found"
           
           # Check for ECR repositories
           echo "Checking for ECR repositories..."
-          aws ecr describe-repositories --region ${{ env.AWS_REGION }} --repository-names liatrio-demo-${{ github.event.inputs.environment }}-api || echo "ECR repository not found"
+          aws ecr describe-repositories --region ${{ env.AWS_REGION }} --repository-names liatrio-demo-${{ github.event.inputs.environment }}-api 2>/dev/null || echo "ECR repository not found (good!)"
           
-          # Check for VPCs (will show default VPC)
+          # Check for VPCs with liatrio-demo tag
           echo "Checking for project VPCs..."
-          aws ec2 describe-vpcs --region ${{ env.AWS_REGION }} --filters "Name=tag:Project,Values=liatrio-demo" || echo "No project VPCs found"
+          aws ec2 describe-vpcs --region ${{ env.AWS_REGION }} --filters "Name=tag:Demo,Values=liatrio-demo" | jq '.Vpcs[] | {VpcId: .VpcId, Tags: .Tags}' || echo "No project VPCs found (good!)"
+          
+          # Check for any resources with liatrio-demo tag
+          echo "Checking for remaining tagged resources..."
+          aws resourcegroupstaggingapi get-resources --region ${{ env.AWS_REGION }} --tag-filters Key=Demo,Values=liatrio-demo || echo "No tagged resources found (good!)"
 
   cleanup-state:
     needs: [validate-input, teardown-infrastructure]
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment }}
-    if: needs.validate-input.outputs.should-destroy == 'true' && needs.teardown-infrastructure.result == 'success'
+    if: needs.validate-input.outputs.should-destroy == 'true' && (success() || github.event.inputs.force_cleanup == 'true')
     
     steps:
       - name: Configure AWS credentials using OIDC
@@ -169,15 +205,37 @@ jobs:
 
       - name: Clean up Terraform state (Optional)
         run: |
-          echo "⚠️  Optional: Clean up Terraform state backend"
-          echo "Note: This will delete the S3 bucket and DynamoDB table used for Terraform state"
-          echo "Only run this if you want to completely reset the project"
-          echo ""
-          echo "To manually clean up state backend:"
-          echo "1. Delete S3 bucket: aws s3 rb s3://liatrio-demo-${{ github.event.inputs.environment }}-tfstate-* --force"
-          echo "2. Delete DynamoDB table: aws dynamodb delete-table --table-name liatrio-demo-${{ github.event.inputs.environment }}-tfstate-lock-*"
-          echo ""
-          echo "Skipping automatic state cleanup for safety..."
+          if [ "${{ github.event.inputs.delete_state_backend }}" = "true" ]; then
+            echo "🗑️  Cleaning up Terraform state backend..."
+            
+            # Get backend configuration
+            cd ../infrastructure
+            terraform init 2>/dev/null || true
+            
+            # Try to get state bucket name from backend config
+            STATE_BUCKET=$(grep -E "bucket\s*=" *.tf 2>/dev/null | head -1 | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+            LOCK_TABLE=$(grep -E "dynamodb_table\s*=" *.tf 2>/dev/null | head -1 | sed 's/.*=\s*"\([^"]*\)".*/\1/' || echo "")
+            
+            if [ -n "$STATE_BUCKET" ]; then
+              echo "Deleting S3 state bucket: $STATE_BUCKET"
+              aws s3 rb s3://$STATE_BUCKET --force 2>/dev/null || echo "Bucket deletion failed or doesn't exist"
+            fi
+            
+            if [ -n "$LOCK_TABLE" ]; then
+              echo "Deleting DynamoDB lock table: $LOCK_TABLE"
+              aws dynamodb delete-table --table-name $LOCK_TABLE 2>/dev/null || echo "Table deletion failed or doesn't exist"
+            fi
+            
+            echo "✅ State backend cleanup completed"
+          else
+            echo "⚠️  Skipping state backend cleanup (not requested)"
+            echo ""
+            echo "To manually clean up state backend later:"
+            echo "1. Find your S3 bucket: aws s3 ls | grep tfstate"
+            echo "2. Delete S3 bucket: aws s3 rb s3://BUCKET_NAME --force"
+            echo "3. Find DynamoDB table: aws dynamodb list-tables | grep tfstate"
+            echo "4. Delete DynamoDB table: aws dynamodb delete-table --table-name TABLE_NAME"
+          fi
 
   notify-completion:
     needs: [validate-input, teardown-application, teardown-infrastructure, cleanup-state]
@@ -191,20 +249,34 @@ jobs:
           echo "==================="
           echo ""
           echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Force cleanup: ${{ github.event.inputs.force_cleanup }}"
+          echo "Delete state backend: ${{ github.event.inputs.delete_state_backend }}"
           echo "Triggered by: ${{ github.actor }}"
           echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
           echo ""
           
           if [ "${{ needs.teardown-application.result }}" = "success" ]; then
             echo "✅ Application cleanup: SUCCESS"
-          else
+          elif [ "${{ needs.teardown-application.result }}" = "failure" ]; then
             echo "❌ Application cleanup: FAILED"
+          else
+            echo "⏭️  Application cleanup: SKIPPED"
           fi
           
           if [ "${{ needs.teardown-infrastructure.result }}" = "success" ]; then
             echo "✅ Infrastructure destruction: SUCCESS"
-          else
+          elif [ "${{ needs.teardown-infrastructure.result }}" = "failure" ]; then
             echo "❌ Infrastructure destruction: FAILED"
+          else
+            echo "⏭️  Infrastructure destruction: SKIPPED"
+          fi
+          
+          if [ "${{ needs.cleanup-state.result }}" = "success" ]; then
+            echo "✅ State cleanup: SUCCESS"
+          elif [ "${{ needs.cleanup-state.result }}" = "failure" ]; then
+            echo "❌ State cleanup: FAILED"
+          else
+            echo "⏭️  State cleanup: SKIPPED"
           fi
           
           echo ""
@@ -213,5 +285,6 @@ jobs:
           echo ""
           echo "Next steps:"
           echo "- Monitor AWS billing to confirm resource deletion"
-          echo "- Clean up any remaining state files if desired"
-          echo "- Remove GitHub environment secrets if no longer needed"
+          echo "- Check AWS console for any remaining resources"
+          echo "- Clean up GitHub environment secrets if no longer needed"
+          echo "- Consider removing the GitHub environment if permanently done"
