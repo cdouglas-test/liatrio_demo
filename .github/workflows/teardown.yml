@@ -73,6 +73,12 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-Teardown
 
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.0'
+          terraform_wrapper: false
+
       - name: Update kubeconfig
         run: |
           # Get EKS cluster name from Terraform outputs first
@@ -196,6 +202,15 @@ jobs:
     if: needs.validate-input.outputs.should-destroy == 'true' && (success() || github.event.inputs.force_cleanup == 'true')
     
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.0'
+          terraform_wrapper: false
+
       - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -208,8 +223,8 @@ jobs:
           if [ "${{ github.event.inputs.delete_state_backend }}" = "true" ]; then
             echo "🗑️  Cleaning up Terraform state backend..."
             
-            # Get backend configuration
-            cd ../infrastructure
+            # Get backend configuration from infrastructure directory
+            cd infrastructure
             terraform init 2>/dev/null || true
             
             # Try to get state bucket name from backend config
