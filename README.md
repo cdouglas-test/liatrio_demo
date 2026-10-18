@@ -1,223 +1,91 @@
-# Liatrio Demo - Cloud-Native Flask API
+# Liatrio Demo
 
-Enterprise Flask API with automated AWS EKS deployment, demonstrating modern DevOps practices including Infrastructure as Code, CI/CD pipelines, and security scanning.
+A small Flask API deployed to AWS EKS, with the infrastructure in Terraform and the build/deploy steps in GitHub Actions.
 
-## Features
+## API
 
-- **Flask REST API** with `/api`, `/health` endpoints
-- **AWS EKS Deployment** with Terraform Infrastructure as Code
-- **Automated CI/CD** with GitHub Actions, security scanning, and OIDC auth
-- **Comprehensive Testing** - unit, integration, contract, and security validation
-- **One-Command Deployment** scripts for complete environment setup
+| Path       | Response                                                       |
+|------------|----------------------------------------------------------------|
+| `/`        | Welcome message and list of endpoints                          |
+| `/api`     | `{"message": "Automate all the things!", "timestamp": <epoch>}` |
+| `/health`  | Health status, used by the Kubernetes probes                   |
+| `/version` | Deployed version (the short commit SHA) and environment        |
 
-## Prerequisites
+## Repository layout
 
-**Required Tools:** AWS CLI v2.x, Terraform v1.0+, kubectl, Docker, PowerShell 5.1+
-
-**AWS Setup:** Account with EKS/EC2/VPC/IAM/ECR/S3/DynamoDB permissions, configured AWS CLI
-
-**Estimated Cost:** ~$100/month for development usage
-
-## Quick Start
-
-### 1. Setup
-```bash
-git clone https://github.com/CRdouglas/liatrio_demo.git
-cd liatrio_demo
-aws configure  # Configure credentials
+```text
+app/                    Flask app, tests, Dockerfile
+infrastructure/         Terraform for the VPC, EKS cluster and ECR repository
+infrastructure/bootstrap/   Terraform for the S3 bucket that holds the main stack's state
+k8s/deployment.yaml     Deployment and LoadBalancer service
+.github/workflows/      CI, deploy and teardown pipelines
 ```
 
-### 2. Deploy Infrastructure
-```bash
-cd infrastructure
-terraform init
-terraform apply -target=module.tfstate_backend -target=random_string.tfstate_suffix
-terraform init -migrate-state
-terraform apply  # Takes ~15-20 minutes
-```
+## Running locally
 
-### 3. Deploy Application
-
-- The first `terraform apply` creates the S3 bucket and DynamoDB table for state storage
-- The `terraform init -migrate-state` migrates your local state to the remote backend
-- Subsequent team members can skip steps 2-3 and run normal `init/plan/apply` for the same environment
-
-### 4. Deploy Application
-
-**Option A: Automated CI/CD**
-1. Fork repository and set up `dev` environment in GitHub
-2. Add `AWS_ROLE_ARN` variable: `arn:aws:iam::ACCOUNT:role/github-actions-role`
-3. Create PRs with conventional titles (see PR Title Conventions below)
-4. Automatic semantic versioning, releases, and deployment
-
-### 5. Verify Deployment
-
-**Option B: Manual Deployment**
-```bash
-.\scripts\deploy.ps1    # Windows
-./scripts/deploy.sh     # Linux/macOS
-```
-
-## Development
-
-### Local Development
 ```bash
 cd app
-pip install -r requirements.txt
-python app.py  # Runs on http://localhost:8080
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest
+python app.py            # http://localhost:8080
+```
 
-# Test with Docker
-docker build -t liatrio-demo-api .
+With Docker:
+
+```bash
+docker build -t liatrio-demo-api app
 docker run -p 8080:8080 liatrio-demo-api
 ```
 
-#### Local Testing
+## Pipelines
 
-## PR Title Conventions & Automated Releases
+All workflows are manual and run only from the Actions tab. Nothing runs on push or pull request.
 
-This project uses **semantic versioning** with automated releases based on PR title conventions. Follow these PR title formats to trigger proper version bumps and releases when your PR is merged:
+- **CI**: runs the tests and a dependency audit, builds the image and smoke-tests it, and runs `terraform fmt`, `validate` and `tflint`. Needs no AWS access.
+- **Deploy**: builds the image, pushes it to ECR tagged with the short commit SHA, applies `k8s/deployment.yaml`, waits for the rollout, and checks the API through the load balancer.
+- **Teardown**: deletes the Kubernetes resources, then runs `terraform destroy`. Type `DESTROY` to confirm.
 
-### PR Title Format
-```
-<type>: <description>
+Deploy and Teardown need a GitHub environment named `dev` with two variables:
 
-[optional scope in parentheses]
-```
+- `AWS_ROLE_ARN`: an IAM role that GitHub Actions can assume through OIDC
+- `TF_STATE_BUCKET`: the bucket created by the bootstrap stack
 
-### PR Title Types
-- **`feat:`** New features → **Minor version bump** (v1.1.0)
-- **`fix:`** Bug fixes → **Patch version bump** (v1.0.1)  
-- **`docs:`** Documentation changes → No version bump
-- **`style:`** Code formatting → No version bump
-- **`refactor:`** Code restructuring → No version bump
-- **`test:`** Test additions/updates → No version bump
-- **`chore:`** Maintenance tasks → No version bump
-- **`BREAKING CHANGE:`** Breaking changes → **Major version bump** (v2.0.0)
+## Provisioning the infrastructure
 
-### Examples
-```bash
-# Patch release (v1.0.1)
-PR Title: "fix: resolve API timeout issue in health endpoint"
+Requires the AWS CLI, Terraform 1.10 or newer, and kubectl. Running the stack costs roughly $100 per month, mostly for the EKS control plane and the NAT gateway.
 
-# Minor release (v1.1.0) 
-PR Title: "feat: add new metrics endpoint for monitoring"
+1. Create the state bucket. Its own state stays local in `infrastructure/bootstrap/terraform.tfstate`, so keep that file.
 
-# Major release (v2.0.0)
-PR Title: "feat!: update API to v2 format"
-# OR
-PR Title: "feat: update API with breaking changes"
+   ```bash
+   cd infrastructure/bootstrap
+   terraform init
+   terraform apply -var="bucket_name=<globally unique name>"
+   ```
 
-# No release
-PR Title: "docs: update README with deployment examples"
+2. Create the cluster, network and registry (about 15 to 20 minutes):
 
-# With scope
-PR Title: "feat(api): add user authentication system"
-PR Title: "fix(auth): resolve login timeout issue"
-```
+   ```bash
+   cd ..
+   cp terraform.tfvars.example terraform.tfvars   # set github_actions_role_arn
+   terraform init -backend-config="bucket=<bucket name>"
+   terraform apply
+   ```
 
-### Commit Message Freedom
-Within your PR, **commit messages can be flexible** - focus on clear development history:
-```bash
-# These commits are fine within a PR titled "feat: add user auth"
-git commit -m "add login endpoint"
-git commit -m "implement JWT validation"  
-git commit -m "fix typo in error message"
-git commit -m "add tests for auth flow"
-```
+3. Set `AWS_ROLE_ARN` and `TF_STATE_BUCKET` on the `dev` environment, then run the Deploy workflow.
 
-### Automated Workflows
-### Automated Workflows
-- **Pull Requests:** PR title validation, build and test without deploying
-- **Main Branch:** Full CI/CD pipeline with automatic versioning based on PR title
-- **Release Creation:** Automatic GitHub releases with generated changelogs
-- **Container Tagging:** Docker images tagged with semantic versions (v1.2.3)
+## Tearing down
 
-The project includes a comprehensive automated test suite that validates all API endpoints and functionality.
-
-**Quick Test Run:**
+Run the Teardown workflow, or locally:
 
 ```bash
-cd app
-python run_tests.py  # Comprehensive test suite
-python -m pytest test_app.py -v -m unit      # Unit tests only
-python -m pytest test_app.py -v -m contract  # API compliance
-```
-
-**Test Coverage:** 24+ test cases, 90%+ code coverage, includes unit/integration/contract/security testing
-
-## Project Structure
-
-```text
-liatrio_demo/
-├── app/                    # Flask application & tests
-├── infrastructure/         # Terraform IaC
-├── k8s/                   # Kubernetes manifests  
-├── .github/workflows/     # CI/CD pipelines
-├── scripts/               # Deployment automation
-└── README.md
-```
-
-## Troubleshooting
-
-**Common Issues:**
-- **Pod OOMKilled:** Current allocation: 128Mi request, 256Mi limit
-- **Terraform State:** Use `terraform init -migrate-state` for backend issues
-- **Pod Won't Start:** Check `kubectl describe pod <name>` and `kubectl logs <name>`
-- **Load Balancer:** Allow 5-10 minutes for AWS ELB provisioning
-
-## Configuration
-
-**Multi-Environment Setup:**
-```bash
-terraform workspace new staging
-terraform apply -var-file="staging.tfvars"
-```
-
-**Scaling:**
-Modify `node_group_min/max/desired_size` in `terraform.tfvars`
-
-## Cleanup
-
-```bash
-kubectl delete -f k8s/simple-deployment.yaml
+kubectl delete -f k8s/deployment.yaml --wait
 cd infrastructure && terraform destroy
+cd bootstrap && terraform destroy -var="bucket_name=<bucket name>"
 ```
 
-**Cost Monitoring:** Monitor AWS billing, use Cost Explorer, set billing alerts
+Delete the Kubernetes service before destroying the stack. Its AWS load balancer isn't managed by Terraform, and the VPC can't be removed while the load balancer exists.
 
-## Contributing
+## License
 
-1. Fork repository and create feature branch
-2. Make changes and test locally using `python run_tests.py`
-3. **Use conventional PR titles** (see PR Title Conventions section above)
-4. Submit pull request with descriptive conventional title
-
-1. Fork repository and create feature branch
-2. Make changes and test locally using `python run_tests.py`
-3. **Use conventional PR titles** (see PR Title Conventions section above)
-4. Submit pull request with descriptive conventional title
-
-**Example PR Workflow:**
-```bash
-git checkout -b feat/new-monitoring
-# Make changes with flexible commit messages
-git commit -m "add prometheus integration"
-git commit -m "update config for metrics"  
-git commit -m "add tests and documentation"
-git push origin feat/new-monitoring
-
-# Create PR with conventional title:
-# Title: "feat: add Prometheus metrics integration"
-# Description: Details about the feature...
-
-# PR validation checks → merge → automatic release
-```
-
-## License & Support
-
-MIT License - See [LICENSE](LICENSE) file
-
-**Support:** GitHub Issues, [AWS EKS Docs](https://docs.aws.amazon.com/eks/latest/userguide/), [Terraform Docs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs)
-
----
-*Enterprise cloud-native Flask API demonstration project*
+MIT

@@ -1,497 +1,79 @@
 name: Deploy
 
-on:
-  push:
-    branches: [main]
-    paths: 
-      - 'app/**'
-      - 'k8s/**'
-      - '.github/workflows/deploy.yml'
+# Builds the image, pushes it to ECR, and rolls it out to EKS.
+# Requires the infrastructure stack to already be applied, and these
+# variables on the "dev" environment:
+#   AWS_ROLE_ARN     IAM role to assume through GitHub OIDC
+#   TF_STATE_BUCKET  bucket created by infrastructure/bootstrap
 
-# Required for OIDC authentication to AWS and semantic release
+on:
+  workflow_dispatch:
+
 permissions:
   id-token: write
-  contents: write  # Required for semantic-release to create releases and tags
-  issues: write  # Required for semantic-release to comment on issues
-  pull-requests: write  # Required for semantic-release to comment on PRs
+  contents: read
+
+concurrency:
+  group: dev-environment
+  cancel-in-progress: false
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: liatrio-demo-dev-api
 
 jobs:
-  semantic-release:
-    runs-on: ubuntu-latest
-    outputs:
-      new-release-published: ${{ steps.semantic.outputs.new_release_published }}
-      new-release-version: ${{ steps.semantic.outputs.new_release_version }}
-      new-release-git-tag: ${{ steps.semantic.outputs.new_release_git_tag }}
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Semantic Release
-        id: semantic
-        uses: cycjimmy/semantic-release-action@v4
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          semantic_version: 19
-
-      - name: Release Summary
-        run: |
-          echo "=== Semantic Release Summary ==="
-          echo "New release published: ${{ steps.semantic.outputs.new_release_published }}"
-          echo "New release version: ${{ steps.semantic.outputs.new_release_version }}"
-          echo "New release git tag: ${{ steps.semantic.outputs.new_release_git_tag }}"
-          echo ""
-          
-          if [ "${{ steps.semantic.outputs.new_release_published }}" = "true" ]; then
-            echo "NEW RELEASE CREATED"
-            echo "Version: v${{ steps.semantic.outputs.new_release_version }}"
-            echo "Tag: ${{ steps.semantic.outputs.new_release_git_tag }}"
-            echo ""
-            echo "Release determined by analyzing:"
-            echo "  - Recent PR merge commits with conventional titles"
-            echo "  - Commit messages following conventional format"
-            echo "  - Breaking change indicators"
-            echo ""
-            echo "Release includes:"
-            echo "  - GitHub release with auto-generated changelog"
-            echo "  - Git tag: ${{ steps.semantic.outputs.new_release_git_tag }}"
-            echo "  - Docker image: v${{ steps.semantic.outputs.new_release_version }}"
-          else
-            echo "No new release needed"
-            echo "Recent commits don't trigger version bump:"
-            echo "  - Only maintenance commits (docs, style, chore)"
-            echo "  - No feat/fix commits since last release"
-            echo ""
-            echo "Will deploy using existing version tags"
-          fi
-
-  get-infrastructure-info:
+  deploy:
     runs-on: ubuntu-latest
     environment: dev
-    outputs:
-      eks-cluster-name: ${{ steps.terraform-output.outputs.eks_cluster_name }}
-      ecr-repository-url: ${{ steps.terraform-output.outputs.ecr_repository_url }}
-    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActions-TerraformOutput
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: '1.9.0'
+          terraform_version: 1.13.4
           terraform_wrapper: false
 
-      - name: Get Terraform outputs
-        id: terraform-output
+      - name: Read infrastructure outputs
+        id: tf
+        working-directory: infrastructure
         run: |
-          cd infrastructure
-          
-          # Initialize Terraform
-          terraform init
-          
-          # Get outputs
-          EKS_CLUSTER_NAME=$(terraform output -raw eks_cluster_name)
-          ECR_REPOSITORY_URL=$(terraform output -raw ecr_repository_url)
-          
-          echo "EKS Cluster Name: $EKS_CLUSTER_NAME"
-          echo "ECR Repository URL: $ECR_REPOSITORY_URL"
-          
-          # Set outputs
-          echo "eks_cluster_name=$EKS_CLUSTER_NAME" >> $GITHUB_OUTPUT
-          echo "ecr_repository_url=$ECR_REPOSITORY_URL" >> $GITHUB_OUTPUT
+          terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          echo "cluster=$(terraform output -raw eks_cluster_name)" >> "$GITHUB_OUTPUT"
+          echo "repository=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
 
-  build-and-push:
-    needs: [semantic-release, get-infrastructure-info]
-    runs-on: ubuntu-latest
-    environment: dev
-    
-    outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
-      image-digest: ${{ steps.build.outputs.digest }}
-      release-version: ${{ needs.semantic-release.outputs.new-release-version }}
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActions-Deploy
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
-          tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=dev-latest
-            type=raw,value=v${{ needs.semantic-release.outputs.new-release-version }},enable=${{ needs.semantic-release.outputs.new-release-published }}
-            type=sha,format=short
-
-      - name: Show release and build information
+      - name: Build and push image
+        id: image
         run: |
-          echo "=== Release Information ==="
-          echo "New release published: ${{ needs.semantic-release.outputs.new-release-published }}"
-          echo "New release version: ${{ needs.semantic-release.outputs.new-release-version }}"
-          echo "New release git tag: ${{ needs.semantic-release.outputs.new-release-git-tag }}"
-          echo ""
-          echo "=== Docker Tags ==="
-          echo "${{ steps.meta.outputs.tags }}"
+          tag="${GITHUB_SHA::7}"
+          image="${{ steps.tf.outputs.repository }}:${tag}"
+          docker build -t "$image" app
+          docker push "$image"
+          echo "uri=$image" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push Docker image
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: ./app
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  deploy:
-    needs: [build-and-push, get-infrastructure-info, semantic-release]
-    runs-on: ubuntu-latest
-    environment: dev
-    if: needs.build-and-push.result == 'success'
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActions-Deploy
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Update kubeconfig
+      - name: Roll out to EKS
         run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ needs.get-infrastructure-info.outputs.eks-cluster-name }}
+          aws eks update-kubeconfig --region "$AWS_REGION" --name "${{ steps.tf.outputs.cluster }}"
+          sed -e "s|IMAGE_URI|${{ steps.image.outputs.uri }}|" \
+              -e "s|value: APP_VERSION|value: \"${{ steps.image.outputs.tag }}\"|" \
+              k8s/deployment.yaml | kubectl apply -f -
+          kubectl rollout status deployment/liatrio-demo-api --timeout=300s
 
-      - name: Deploy to EKS
+      - name: Smoke test
         run: |
-          # Use the latest tag 
-          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest"
-          
-          echo "Using image: $IMAGE_URI"
-          
-          # Show release information if available
-          if [ "${{ needs.semantic-release.outputs.new-release-version }}" != "" ]; then
-            echo "Deploying NEW RELEASE: v${{ needs.semantic-release.outputs.new-release-version }}"
-            echo "Release type: Semantic versioning based on PR analysis"
-          else
-            echo "Deploying development build"
-            echo "Commit: ${{ github.sha }}"
-            echo "No new semantic release (maintenance commits only)"
-          fi
-          # Clean up any existing deployments first
-          echo "=== Cleaning up existing deployments ==="
-          kubectl delete deployment liatrio-demo-api --ignore-not-found=true
-          kubectl delete deployment liatrio-demo-api-simple --ignore-not-found=true
-          kubectl delete pod liatrio-demo-api-pod --ignore-not-found=true
-          sleep 10
-          
-          # Update simple deployment manifest
-          sed -i "s|IMAGE_URI_PLACEHOLDER|${IMAGE_URI}|g" k8s/simple-deployment.yaml
-          
-          # Show what we're deploying
-          echo "=== Deployment manifest ==="
-          cat k8s/simple-deployment.yaml
-          echo ""
-          
-          # Apply simple deployment
-          echo "=== Applying deployment ==="
-          kubectl apply -f k8s/simple-deployment.yaml
-          
-          # Wait with shorter timeout and get status regardless
-          echo "=== Waiting for deployment (60s timeout) ==="
-          kubectl rollout status deployment/liatrio-demo-api-simple --timeout=60s || echo "Deployment timeout"
-          
-          # Get detailed status
-          echo ""
-          echo "=== Deployment Status ==="
-          kubectl get deployment liatrio-demo-api-simple -o wide
-          
-          echo ""
-          echo "=== Pod Status ==="
-          kubectl get pods -l app=liatrio-demo-api-simple -o wide
-          
-          echo ""
-          echo "=== Pod Details ==="
-          kubectl describe pods -l app=liatrio-demo-api-simple
-          
-          echo ""
-          echo "=== Recent Events ==="
-          kubectl get events --sort-by='.lastTimestamp' | tail -10
-          
-          echo ""
-          echo "=== Services ==="
-          kubectl get services
-
-      - name: Verify deployment
-        if: always()  # Run this even if deploy step fails
-        run: |
-          echo "=== Final Status Check ==="
-          
-          # Check if pod is running
-          POD_STATUS=$(kubectl get pods -l app=liatrio-demo-api-simple --no-headers 2>/dev/null | awk '{print $3}' | head -1 || echo "NotFound")
-          echo "Pod Status: $POD_STATUS"
-          
-          if [ "$POD_STATUS" = "Running" ]; then
-            echo "SUCCESS! Pod is running!"
-            
-            # Get load balancer URL
-            LB_URL=$(kubectl get service liatrio-demo-api-simple-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-            if [ -n "$LB_URL" ]; then
-              echo "Load Balancer URL: http://$LB_URL"
-              echo "API Endpoint: http://$LB_URL/api"
-              echo "Health Endpoint: http://$LB_URL/health"
-            else
-              echo "Load balancer still provisioning..."
-            fi
-            
-            # Test pod logs
-            echo ""
-            echo "=== Application Logs ==="
-            kubectl logs -l app=liatrio-demo-api-simple --tail=20 || echo "No logs yet"
-            
-          else
-            echo "Pod not running. Status: $POD_STATUS"
-            
-            # Get logs anyway for debugging
-            echo ""
-            echo "=== Debug Logs ==="
-            kubectl logs -l app=liatrio-demo-api-simple --tail=20 || echo "No logs available"
-          fi
-
-  post-deploy-tests:
-    needs: [deploy, get-infrastructure-info]
-    runs-on: ubuntu-latest
-    environment: dev
-    if: needs.deploy.result == 'success'
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActions-PostDeployTest
-
-      - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ needs.get-infrastructure-info.outputs.eks-cluster-name }}
-
-      - name: Wait for load balancer
-        timeout-minutes: 10
-        run: |
-          echo "Waiting for load balancer to be ready..."
-          for i in {1..60}; do
-            LB_URL=$(kubectl get service liatrio-demo-api-simple-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-            if [ -n "$LB_URL" ]; then
-              echo "Load balancer ready: $LB_URL"
-              echo "LB_URL=$LB_URL" >> $GITHUB_ENV
-              break
-            fi
-            echo "Attempt $i: Load balancer not ready yet..."
+          for _ in $(seq 1 60); do
+            host=$(kubectl get service liatrio-demo-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+            [ -n "$host" ] && curl -fsS "http://$host/health" > /dev/null 2>&1 && break
             sleep 10
           done
+          [ -n "$host" ] || { echo "Load balancer hostname was never assigned"; exit 1; }
 
-      - name: Test deployed API endpoints
-        run: |
-          if [ -n "$LB_URL" ]; then
-            echo "Testing deployed API at: http://$LB_URL"
-            
-            # Test API endpoint
-            echo "=== Testing /api endpoint ==="
-            API_RESPONSE=$(curl -s -f "http://$LB_URL/api" || echo "FAILED")
-            echo $API_RESPONSE | jq .
-            
-            # Verify required response format
-            MESSAGE=$(echo $API_RESPONSE | jq -r '.message' 2>/dev/null || echo "")
-            if [ "$MESSAGE" != "Automate all the things!" ]; then
-              echo "❌ API endpoint test FAILED: Wrong message"
-              exit 1
-            fi
-            
-            # Test health endpoint
-            echo "=== Testing /health endpoint ==="
-            HEALTH_RESPONSE=$(curl -s -f "http://$LB_URL/health" || echo "FAILED")
-            echo $HEALTH_RESPONSE | jq .
-            
-            # Verify health status
-            STATUS=$(echo $HEALTH_RESPONSE | jq -r '.status' 2>/dev/null || echo "")
-            if [ "$STATUS" != "healthy" ]; then
-              echo "❌ Health endpoint test FAILED: Not healthy"
-              exit 1
-            fi
-            
-            echo "✅ All API endpoint tests passed!"
-            
-          else
-            echo "⚠️ Load balancer URL not available, using port-forward for testing"
-            
-            # Port-forward test as fallback
-            kubectl port-forward service/liatrio-demo-api-simple-service 8080:80 &
-            PF_PID=$!
-            sleep 5
-            
-            # Test via port-forward
-            curl -s -f "http://localhost:8080/api" | jq .
-            curl -s -f "http://localhost:8080/health" | jq .
-            
-            # Cleanup
-            kill $PF_PID
-            
-            echo "✅ Port-forward tests passed!"
-          fi
-
-      - name: Performance test
-        run: |
-          if [ -n "$LB_URL" ]; then
-            echo "=== Running basic performance test ==="
-            
-            # Simple load test with curl
-            for i in {1..10}; do
-              START_TIME=$(date +%s%N)
-              curl -s -f "http://$LB_URL/api" > /dev/null
-              END_TIME=$(date +%s%N)
-              DURATION=$(( (END_TIME - START_TIME) / 1000000 ))
-              echo "Request $i: ${DURATION}ms"
-            done
-            
-            echo "✅ Performance test completed!"
-          else
-            echo "⚠️ Skipping performance test - Load balancer URL not available"
-          fi
-
-  deployment-summary:
-    needs: [semantic-release, build-and-push, deploy, post-deploy-tests, get-infrastructure-info]
-    runs-on: ubuntu-latest
-    environment: dev
-    if: always()
-    
-    steps:
-      - name: Configure AWS credentials using OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          role-session-name: GitHubActions-Summary
-
-      - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ needs.get-infrastructure-info.outputs.eks-cluster-name }}
-
-      - name: Get API URLs
-        run: |
-          # Get load balancer URL
-          LB_URL=$(kubectl get service liatrio-demo-api-simple-service -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-          
-          if [ -n "$LB_URL" ]; then
-            echo "API_BASE_URL=http://$LB_URL" >> $GITHUB_ENV
-            echo "API_ENDPOINT=http://$LB_URL/api" >> $GITHUB_ENV
-            echo "HEALTH_ENDPOINT=http://$LB_URL/health" >> $GITHUB_ENV
-          else
-            echo "API_BASE_URL=Load balancer still provisioning..." >> $GITHUB_ENV
-            echo "API_ENDPOINT=Load balancer still provisioning..." >> $GITHUB_ENV
-            echo "HEALTH_ENDPOINT=Load balancer still provisioning..." >> $GITHUB_ENV
-          fi
-
-      - name: Deployment Summary
-        run: |
-          echo "## 🚀 Deployment Summary"
-          echo "========================"
-          echo "### Release Information"
-          echo "New release published: ${{ needs.semantic-release.outputs.new-release-published }}"
-          if [ "${{ needs.semantic-release.outputs.new-release-version }}" != "" ]; then
-            echo "Release version: v${{ needs.semantic-release.outputs.new-release-version }}"
-            echo "Git tag: ${{ needs.semantic-release.outputs.new-release-git-tag }}"
-            echo ""
-            echo "Release triggered by: PR-level semantic analysis"
-            echo "Based on: Conventional PR titles and commit messages"
-          else
-            echo "Development build (no new release)"
-            echo "Using existing version tags for deployment"
-          fi
-          echo ""
-          echo "### Job Status"
-          echo "Semantic Release: ${{ needs.semantic-release.result }}"
-          echo "Build & Push: ${{ needs.build-and-push.result }}"
-          echo "Deploy: ${{ needs.deploy.result }}"
-          echo "Post-Deploy Tests: ${{ needs.post-deploy-tests.result }}"
-          echo ""
-          echo "### Deployment Details"
-          echo "Commit: ${{ github.sha }}"
-          echo "Branch: ${{ github.ref_name }}"
-          echo "Triggered by: ${{ github.actor }}"
-          echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          echo ""
-          echo "### API Endpoints"
-          echo "Base URL: $API_BASE_URL"
-          echo "API Endpoint: $API_ENDPOINT"
-          echo "Health Check: $HEALTH_ENDPOINT"
-          echo "Metrics: $METRICS_ENDPOINT"
-          echo ""
-          echo "### Quick Test Commands"
-          echo "\`\`\`bash"
-          echo "# Test the API"
-          echo "curl $API_ENDPOINT"
-          echo ""
-          echo "# Check health status"
-          echo "curl $HEALTH_ENDPOINT"
-          echo ""
-          echo "# View metrics"
-          echo "curl $METRICS_ENDPOINT"
-          echo "\`\`\`"
-          echo ""
-          
-          if [[ "${{ needs.deploy.result }}" == "success" ]]; then
-            echo "### Deployment Status: SUCCESS"
-            echo "Application is deployed and ready to use!"
-            echo ""
-            echo "The Liatrio demo API is now live and responding to requests."
-            echo "You can test the endpoints above to verify functionality."
-          else
-            echo "### Deployment Status: FAILED"
-            echo "Deployment encountered issues - check job logs for details"
-            echo ""
-            echo "Please review the deploy job output for troubleshooting information."
-          fi
+          curl -fsS "http://$host/api" | jq -e '.message == "Automate all the things!"'
+          curl -fsS "http://$host/version" | jq -e ".version == \"${{ steps.image.outputs.tag }}\""
+          echo "Deployed to http://$host" >> "$GITHUB_STEP_SUMMARY"

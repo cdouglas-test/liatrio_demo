@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+test_app.py
+pytest.ini
+requirements-dev.txt

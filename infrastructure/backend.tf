@@ -1,12 +1,10 @@
-# backend.tf
-# Remote state backend configuration
-
+# The bucket is created by infrastructure/bootstrap. Supply its name at init:
+#   terraform init -backend-config="bucket=<bucket name>"
 terraform {
   backend "s3" {
-    bucket         = "liatrio-demo-dev-tfstate-u58x74nr"
-    key            = "terraform.tfstate"
-    region         = "us-east-1"
-    dynamodb_table = "liatrio-demo-dev-tfstate-lock-u58x74nr"
-    encrypt        = true
+    key          = "liatrio-demo/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
   }
 }
